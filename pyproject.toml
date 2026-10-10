@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "readtrial"
+version = "0.1.0"
+description = "Try a README as a stranger; keep command evidence and deterministic verdicts."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{name = "TayHCode"}]
+dependencies = []
+
+[project.scripts]
+readtrial = "readtrial.cli:main"
+
+[tool.setuptools]
+packages = ["readtrial"]

@@ -1,0 +1,3 @@
+FROM ubuntu:24.04
+RUN apt-get update && apt-get install -y --no-install-recommends python3 git bubblewrap ca-certificates util-linux && rm -rf /var/lib/apt/lists/*
+CMD ["sleep", "infinity"]

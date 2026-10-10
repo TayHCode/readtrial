@@ -1,0 +1,124 @@
+{
+  "exclude": [],
+  "approvals": [
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "readtrial/targets.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "readtrial/proxy.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    },
+    {
+      "scope": "tree",
+      "kind": "ipv4",
+      "path": "tests/test_trial.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "readtrial/targets.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "readtrial/proxy.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    },
+    {
+      "scope": "history",
+      "kind": "ipv4",
+      "path": "tests/test_trial.py",
+      "fingerprint": "12ca17b49af22894",
+      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
+    }
+  ],
+  "quickstart": [
+    {
+      "file": "README.md",
+      "line": 89,
+      "argv": [
+        "python",
+        "-m",
+        "pip",
+        "install",
+        "."
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 25,
+      "argv": [
+        "python3",
+        "--version"
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 26,
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "--help"
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 90,
+      "argv": [
+        "readtrial",
+        "--help"
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 27,
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "demo",
+        "--out",
+        "trial-results/demo"
+      ]
+    }
+  ],
+  "checks": [
+    {
+      "role": "tests",
+      "argv": [
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-q"
+      ],
+      "file": "README.md",
+      "line": 28
+    },
+    {
+      "role": "syntax",
+      "argv": [
+        "python",
+        "-m",
+        "compileall",
+        "-q",
+        "readtrial"
+      ]
+    }
+  ]
+}
