@@ -283,7 +283,8 @@ after the first turn also include `done` and `findings` (`command:null` on compl
 normalizes documented legacy aliases `proposed_command` and `cmd`, refuses
 conflicting/unknown fields, and retries one malformed response with a corrective
 message, logging each response as its own agent row. A single serialized command
-action is unwrapped before execution; another malformed reply receives one
+action is unwrapped before execution and annotated only when unwrapping occurred;
+another malformed reply receives one
 corrective retry rather than ending the trial immediately. Completion without any README command is a protocol error. Every
 adapter failure is reported as `agent-protocol-error:` with a bounded scrubbed
 diagnosis; raw CLI envelopes and session/usage metadata are omitted from errors
@@ -312,6 +313,8 @@ Every command starts in the clone. Files persist; shell state does not. If an
 agent adds only a simple `cd` prefix to an otherwise exact declared README
 command, the runner ignores that prefix, executes the declared command from the
 clone root, and records an `agent-deviation` note with the original proposal.
+The note appears in `commands.jsonl`, `findings.json`, `report.md`, and one stdout
+line. It records agent behavior and does not change the script verdict.
 Other unmatched failures are labelled agent commands rather than README steps. Use
 `cd subdir && ...` in one POSIX command. The brief names the target OS and shell.
 On Windows PowerShell 5.1, `&&`/`||` are unsupported: use `py -3`, `;` and

@@ -248,14 +248,17 @@ class Agent:
             try:
                 if result.exit_code or result.timed_out or result.truncated:
                     raise ValueError("CLI failed, timed out, or exceeded output cap")
-                value = (codex_adapter.response(result.output) if self.codex else
-                         claude_response(result.output) if self.claude else normalize(json.loads(result.output)))
+                notes: list[str] = []
+                value = (codex_adapter.response(result.output, notes=notes) if self.codex else
+                         claude_response(result.output, notes=notes) if self.claude else
+                         normalize(json.loads(result.output), notes=notes))
                 if value.get('done') and not context.get('history'):
                     raise ValueError("done without a README command proposal")
+                annotation = ' (' + '; '.join(notes) + ')' if notes else ''
                 if attempt:
-                    result.output = "Protocol correction retry: " + correction + "\nFinal action:\n" + scrub(json.dumps(value))
+                    result.output = "Protocol correction retry: " + correction + "\nFinal action" + annotation + ":\n" + scrub(json.dumps(value))
                 else:
-                    result.output = 'Normalized agent action (one serialized command level accepted): ' + scrub(json.dumps(value))
+                    result.output = 'Normalized agent action' + annotation + ': ' + scrub(json.dumps(value))
                 return value, result
             except (ValueError, TypeError, KeyError) as exc:
                 # CLI envelopes contain session/account/usage metadata. Report
@@ -340,6 +343,7 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
     target = None
     error = ""
     advisory: list[dict] = []
+    deviations: list[dict] = []
     results: list[dict] = []
     declared: list[dict] = []
     elapsed_to_success = None
@@ -421,7 +425,14 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
                     original = action['command']
                     action['command'] = without_added_cd(original, steps, windows)
                     if action['command'] != original:
-                        evidence.log('agent-deviation', original, Result(None, 'AGENT deviation: ignored added cd; executed the exact README command from the clone root: ' + action['command'], 0))
+                        note = 'AGENT deviation: ignored added cd; selected the exact README command from the clone root: ' + action['command']
+                        evidence.log('agent-deviation', original, Result(None, note, 0))
+                        line = next(step['line'] for step in steps if step['command'] == action['command'])
+                        deviations.append({'id': 'advisory-agent-deviation-' + str(evidence.records[-1]['sequence']),
+                                           'severity': 'MINOR', 'type': 'TOOL', 'machine': target_spec,
+                                           'command': original, 'expected': 'Copy the README command exactly from the clone root.',
+                                           'actual': note, 'doc_line': f'README.md:{line}'})
+                        print(target_spec + ': ' + scrub(note).replace('\n', ' ').replace('\r', ' '), flush=True)
                     if any(e['command'] == action['command'] and succeeded(e) for e in context['history']):
                         evidence.log('duplicate-command', action['command'], Result(None, 'Not run: this exact command already succeeded. Finish or try the next README step.', 0))
                         context['duplicate_note'] = 'Do not repeat successful commands; the repeated proposal was not run.'
@@ -480,7 +491,7 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
     trial_commands = [e for e in evidence.records if e['phase'] == 'trial' and e['kind'] == 'command']
     windows = getattr(target, 'platform', 'Linux') == 'Windows'
     machine_class = target_spec.split(':', 1)[0] + ':' + getattr(target, 'platform', 'Linux')
-    advisory = canonical_findings(advisory, trial_commands, machine_class, windows)
+    advisory = canonical_findings(advisory, trial_commands, machine_class, windows) + deviations
     previous = canonical_findings(previous, previous_records or [], machine_class, windows) if previous is not None else None
     readme_coverage = coverage(steps, trial_commands, windows)
     if outcome == 'PASS' and not readme_coverage['complete']:
@@ -510,6 +521,12 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
         detail = 'FAIL: ' + '; '.join(failures or ['see command evidence'])
     advisory_verification = []
     for item in advisory:
+        if item in deviations:
+            records = [e for e in evidence.records if e['kind'] == 'agent-deviation' and e['command'] == item['command']]
+            advisory_verification.append({'id': item['id'], 'status': 'recorded',
+                                          'command_evidence': [e['sequence'] for e in records],
+                                          'reason': 'Runner recorded the ignored prefix and the exact README command.'})
+            continue
         commands = [e for e in trial_commands if e['command'] == item['command']]
         corruption = any(word in (item['id'] + ' ' + item['actual']).lower() for word in ('u+fffd', 'replacement character'))
         advisory_verification.append({'id': item['id'], 'status': 'contradicted' if corruption and '\ufffd' not in readme.output else 'unverified',
@@ -563,8 +580,10 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
     if error:
         report += ["Trial limitation/error: " + error, ""]
     for item, verification in zip(advisory, advisory_verification):
-        report += [f"- {item['id']}: {item['severity']} / {item['type']} ({item['doc_line']})",
-                   "  Expected: " + item["expected"], "  Actual: " + item["actual"],
+        report += [f"- {item['id']}: {item['severity']} / {item['type']} ({item['doc_line']})"]
+        if item in deviations:
+            report += ["  Original proposal: " + item['command']]
+        report += ["  Expected: " + item["expected"], "  Actual: " + item["actual"],
                    "  Independent evidence: " + verification["status"] + "; " + verification["reason"]]
     if changes:
         report += ["", ('Rerun comparison incomplete: previous findings are unassessed; no progress inferred.' if outcome == 'INCOMPLETE' else

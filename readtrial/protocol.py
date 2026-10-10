@@ -33,7 +33,7 @@ def scrub(text: str) -> str:
     return text[:1200] + (' [truncated]' if len(text) > 1200 else '')
 
 
-def normalize(value: object, *, unwrap: bool = True) -> dict:
+def normalize(value: object, *, unwrap: bool = True, notes: list[str] | None = None) -> dict:
     if not isinstance(value, dict):
         raise TypeError('action must be a JSON object')
     keys = set(value) & {'command', 'proposed_command', 'cmd'}
@@ -58,6 +58,8 @@ def normalize(value: object, *, unwrap: bool = True) -> dict:
                     action = normalize(nested, unwrap=False)
                     if set(action) != {'command'}:
                         raise ValueError('serialized command must contain a shell command, not completion')
+                    if notes is not None:
+                        notes.append('one serialized command level accepted')
                     return action
             return {'command': command}
         value = {k: v for k, v in value.items() if k != key}
@@ -80,7 +82,7 @@ def normalize(value: object, *, unwrap: bool = True) -> dict:
     return value
 
 
-def claude_response(output: str) -> dict:
+def claude_response(output: str, *, notes: list[str] | None = None) -> dict:
     # CLI diagnostics may surround the JSON envelope; only one result is accepted.
     decoder = json.JSONDecoder()
     try:
@@ -96,7 +98,7 @@ def claude_response(output: str) -> dict:
     if value.get('is_error'):
         raise ValueError('Claude reported an error')
     if 'structured_output' in value:
-        return normalize(value['structured_output'])
+        return normalize(value['structured_output'], notes=notes)
     if not isinstance(value.get('result'), str):
         raise TypeError('Claude returned no text/structured result')
-    return normalize(json.loads(value['result']))
+    return normalize(json.loads(value['result']), notes=notes)
