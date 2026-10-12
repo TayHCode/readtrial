@@ -45,7 +45,7 @@ All SSH targets have command inspection, no filesystem/network confinement. Offi
 lines are rewritten into the work folder, with no profile/PATH edits. The runner
 supplies work-folder uv download/venv/cache settings; work-folder bin and .venv executables are on child PATH.
 Stop once the README first-run/offline help goal works; optional workflows, browser
-launches and real audits need separate trials. Never use browser ports 9222-9226.
+launches and real audits need separate trials. Never access browsers or debugging endpoints.
 Do not repeat a command that already succeeded. Finish or try the next required
 README step; a help-only trial may receive PASS (partial), never full coverage.
 Do not access credentials, homes, keys, browser ports or system services. Do not
@@ -337,7 +337,7 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
                commit: str, *, target_factory=Target, agent_factory=Agent,
                previous: list[dict] | None = None, previous_records: list[dict] | None = None,
                fixed_checks: list[dict] | None = None) -> dict:
-    destination.mkdir()
+    destination.mkdir(mode=0o700)
     limits = Limits(**config["limits"])
     evidence = Evidence(destination / "commands.jsonl")
     target = None
@@ -367,8 +367,11 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
                                 container_image=config.get("container_image", "readtrial-sandbox:latest"),
                                 trusted_target=config.get("trusted_target", False),
                                 ssh_linux_ack=config.get("ssh_linux_ack", False),
+                                dedicated_account=config.get('dedicated_account', False),
                                 instance_prefix=config.get("instance_prefix", "readtrial-"))
         target.repository = config.get("repository_url", config["repo"])
+        if hasattr(target, 'configure_isolation'):
+            target.configure_isolation(destination, config, bundle)
         target.prepare(bundle)
         network = target.network
         evidence.phase = "metadata"
@@ -402,7 +405,7 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
         evidence.phase = "trial"
         # An empty private cwd keeps repository instructions/config out of CLI
         # discovery. CLI authentication remains on the trusted controller only.
-        with tempfile.TemporaryDirectory(prefix="readtrial-agent-") as cwd:
+        with tempfile.TemporaryDirectory(prefix="readtrial-agent-", dir=destination) as cwd:
             for _ in range(limits.max_steps):
                 for attempt in range(2):
                     try:
@@ -543,7 +546,8 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
                "every_readme_step_succeeded": bool(trial_commands) and not failed_commands,
                "failed_steps": [{'command': e['command'], 'exit_code': e['exit_code'], 'denied': e['denied'],
                                  'segments': [step for step in e.get('steps', []) if step['exit_code']]} for e in failed_commands],
-               "advisory_verification": advisory_verification}
+               "advisory_verification": advisory_verification,
+               'capabilities': getattr(target, 'capabilities', {'status': 'unavailable'})}
     (destination / "findings.json").write_text(json.dumps(advisory, indent=2) + "\n")
     (destination / "result.json").write_text(json.dumps(summary, indent=2) + "\n")
     verified = {item['id'] for item in (previous or [])
@@ -573,6 +577,8 @@ def run_target(config: dict, target_spec: str, destination: Path, bundle: Path,
         if not check['passed']:
             report += [f"Failed declared check (exit {check['exit_code']}): `{check['command']}`", ""]
     report += [f"Isolation: {summary['isolation']}", ""]
+    report += ['Capability evidence: `result.json` separates requested policy from observed capabilities,',
+               'preflight, preservation checks and cleanup. Unverified fields are not enforcement proof.', '']
     if summary["trusted_mode"]:
         report += ["**TRUSTED-TARGET — " + NOTICE + "**", ""]
     elif summary['notice_label'] == 'SSH-LINUX-UNCONFINED':
@@ -629,7 +635,7 @@ def run(config: dict, out: Path, *, prior: Path | None = None) -> int:
     summaries = []
     old = json.loads((prior / "run.json").read_text()) if prior else None
     try:
-        with tempfile.TemporaryDirectory(prefix="readtrial-source-") as directory:
+        with tempfile.TemporaryDirectory(prefix="readtrial-source-", dir=out) as directory:
             bundle, commit = snapshot(config["repo"], Path(directory), limits, "" if prior else config.get("ref", ""))
             for index, spec in enumerate(config["targets"]):
                 relative = f"target-{index + 1}"
@@ -641,11 +647,11 @@ def run(config: dict, out: Path, *, prior: Path | None = None) -> int:
                 summaries.append(summary)
     except (OSError, TargetError, ValueError, KeyError, IndexError) as exc:
         (out / "error.txt").write_text(str(exc) + "\n")
-        (out / "run.json").write_text(json.dumps({"version": 1, "config": config,
+        (out / "run.json").write_text(json.dumps({"version": 2, "config": config,
                                                 "results": summaries, "error": str(exc)}, indent=2) + "\n")
         print("INCOMPLETE: " + (friendly_error(exc) if isinstance(exc, OSError) else str(exc)))
         return 2
-    (out / "run.json").write_text(json.dumps({"version": 1, "config": config, "results": summaries}, indent=2) + "\n")
+    (out / "run.json").write_text(json.dumps({"version": 2, "config": config, "results": summaries}, indent=2) + "\n")
     if prior:
         combined = {'targets': {f'target-{i + 1}': json.loads((out / f'target-{i + 1}' / 'diff.json').read_text()) for i in range(len(summaries))}}
         (out / 'diff.json').write_text(json.dumps(combined, indent=2) + '\n')

@@ -10,17 +10,20 @@ import shlex
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import urlsplit
 
 runner = importlib.import_module(".process", __package__) if __package__ else importlib.import_module("process")
 Result, execute = runner.Result, runner.execute
 installers = importlib.import_module(".installers", __package__) if __package__ else importlib.import_module("installers")
+isolation = importlib.import_module('.isolation', __package__) if __package__ else importlib.import_module('isolation')
 shell = installers.shell
 
 SYSTEM = {"sudo", "su", "doas", "apt", "apt-get", "dpkg", "dnf", "yum", "apk",
           "pacman", "zypper", "systemctl", "service", "crontab", "mount", "umount",
           "reboot", "shutdown", "lxc", "docker", "podman", "ssh", "scp"}
 SENSITIVE = (".ssh", ".aws", ".git-credentials", ".netrc", "id_rsa", "id_ed25519",
-             "credentials", "docker.sock")
+             "credentials", "docker.sock", ".gnupg", ".azure", "keychain", "dpapi",
+             "browser", "chromium", "chrome", "firefox", "msedge", "login data")
 
 
 def segment_policy(command: str, disposable: bool = False) -> str:
@@ -29,8 +32,6 @@ def segment_policy(command: str, disposable: bool = False) -> str:
         return "empty, invalid, or oversized command"
     if any(word in command.lower() for word in SENSITIVE):
         return "credential path"
-    if re.search(r"\b922[2-6]\b", command):
-        return "reserved browser port"
     if re.search(r"(^|[\s'\"=;])(?:~|/(?:home|root|etc|proc|sys|dev|run|var|tmp|Users|private|Volumes)(?:/|\b))", command):
         return "path outside workspace"
     visible = re.sub(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"<>;)]+", "", command)
@@ -51,7 +52,8 @@ def segment_policy(command: str, disposable: bool = False) -> str:
     return ""
 
 
-def policy(command: str, disposable: bool = False, *, root: Path | None = None, windows: bool = False) -> str:
+def policy(command: str, disposable: bool = False, *, root: Path | None = None, windows: bool = False,
+           denied_endpoints: set[str] | None = None) -> str:
     try:
         segments, _ = shell.split(command, windows)
     except ValueError as exc:
@@ -61,6 +63,17 @@ def policy(command: str, disposable: bool = False, *, root: Path | None = None, 
         reason = 'path outside workspace (non-POSIX separator)'
     if reason:
         return reason
+    if any(re.search(r'(?<![a-z0-9_.-])' + re.escape(endpoint) + r'(?![0-9])', command.lower())
+           for endpoint in (denied_endpoints or set())):
+        return 'operator-denied endpoint'
+    for address in re.findall(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"<>;)]+", command):
+        try:
+            parsed = urlsplit(address)
+            endpoint = f'{parsed.hostname}:{parsed.port or (443 if parsed.scheme == "https" else 80)}'
+            if endpoint in (denied_endpoints or set()):
+                return 'operator-denied endpoint'
+        except ValueError:
+            return 'invalid network endpoint'
     for index, segment in enumerate(segments, 1):
         reason = segment_policy(segment, disposable)
         if reason:
@@ -85,7 +98,6 @@ def sandbox(control: str, bundle: str, disk_mb: int, proxy: str = "") -> list[st
              "--size", str(disk_mb * 1024 * 1024), "--tmpfs", "/workspace",
              "--chdir", "/workspace", "--remount-ro", "/", "--remount-ro", "/dev", "--clearenv",
              "--setenv", "PATH", "/workspace/bin:/workspace/repo/.venv/bin:/usr/local/bin:/usr/bin:/bin",
-             "--setenv", "HOME", "/workspace/home", "--setenv", "TMPDIR", "/workspace/tmp",
              "--setenv", "LANG", "C.UTF-8", "--setenv", "GIT_CONFIG_NOSYSTEM", "1",
              "--setenv", "GIT_CONFIG_GLOBAL", "/dev/null",
              "--setenv", "PIP_DISABLE_PIP_VERSION_CHECK", "1"]
@@ -106,12 +118,17 @@ def protect_control() -> None:
         raise OSError("cannot protect runner control process")
 
 
+def initialise_workspace(root: Path) -> None:
+    isolation.make_environment(root)
+    (root / 'repo').mkdir(mode=0o700)
+
+
 def main() -> int:
     protect_control()
     # A persistent private tmpfs retains the stranger's working files between
     # commands. Nothing from that filesystem is mounted on the host.
-    for name in ("home", "tmp", "repo", "bin"):
-        Path(name).mkdir()
+    os.umask(0o077)
+    initialise_workspace(Path('/workspace'))
     for line in sys.stdin.buffer:
         if len(line) > 131072:
             return 2
@@ -121,7 +138,8 @@ def main() -> int:
         if request.get("setup"):
             runnable, denial = command, ""
         elif not denial:
-            denial = policy(inspected, request["disposable"], root=Path('/workspace/repo'))
+            denial = policy(inspected, request["disposable"], root=Path('/workspace/repo'),
+                            denied_endpoints=set(request.get('denied_endpoints', [])))
         if denial:
             result = Result(126, "", 0, denied=denial)
         else:

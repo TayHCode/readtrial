@@ -8,8 +8,21 @@ target. An independent script decides PASS, PASS (partial), FAIL, or INCOMPLETE.
 The result is command evidence, advisory findings, and a learning loop:
 **try the README → fix the project or docs → rerun → compare findings**.
 No model SDK or runtime packages. Python 3.11+ and Git are required on the
-controller. This checkout is prepared locally; its future public repository has
-not been published. Obtain the checkout from the person who supplied this release.
+controller. Start from a checkout of
+[readtrial](https://github.com/TayHCode/readtrial).
+
+## Which isolation do I get on my OS?
+
+| Your OS | Supported route | Isolation and limits |
+| --- | --- | --- |
+| Linux | Linux controller → LXC trial guest | Unprivileged namespaces, read-only system mounts, no NIC, exact-domain proxy, CPU/RAM/PID/disk ceilings; preflight must prove enforcement. Linux SSH is trusted mode only. |
+| macOS | Linux controller → dedicated macOS SSH account | Standard non-sudo account, fresh HOME/XDG roots, home guards and journaled cleanup; **trusted mode only**, no network confinement or aggregate resource quotas. Use a Linux VM and LXC for untrusted code. |
+| Windows | Disposable Linux VM controller → LXC trial guest | Follow the Linux setup inside the VM; the VM is the controller, and LXC is the separate trial target. Native Windows SSH is **trusted mode only**, without quotas or Job Object isolation. |
+
+**Windows Sandbox is not supported:** readtrial has no backend to create,
+control, attest or recover Sandbox targets. Enabling the Windows feature does
+not provide a readtrial target. Create the Linux VM yourself; readtrial does not
+orchestrate VMs. Native macOS and Windows controller trials remain unverified.
 
 ## Five-minute CLI quickstart
 
@@ -68,7 +81,9 @@ With uv installed instead:
 uv run --no-project --python 3.12 python -m readtrial --help
 ```
 
-Run actual Windows SSH trials from a Linux controller with `--trusted-target`.
+For isolated trials on Windows, create a disposable Linux VM and follow
+[Isolated trials](#isolated-trials) inside it. Windows Sandbox is not supported.
+Run native Windows SSH trials from a Linux controller with `--trusted-target`.
 The SSH login shell may be cmd; trial commands use PowerShell with profiles off.
 The unit suite's controller process tests require POSIX. Windows-controller
 trial execution remains unverified.
@@ -89,6 +104,224 @@ python3 -m venv .venv
 python -m pip install .
 readtrial --help
 ```
+
+## Isolated trials
+
+Use a Linux controller with internet access: a real Linux host or a fresh Linux
+VM both work, including a disposable Linux VM hosted on Windows or macOS.
+The VM where you install readtrial and set up LXD is your
+**controller**. A **trial guest** is the separate target that `readtrial run`
+creates or prepares later; being a VM does not make the controller a trial guest.
+Start in this checkout. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/) if missing; the
+commands below install readtrial into a local environment without changing Python:
+
+```sh
+TOOLS="$PWD/.scratch/controller-tools"
+mkdir -p "$TOOLS/bin"
+curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$TOOLS/bin" UV_NO_MODIFY_PATH=1 sh
+"$TOOLS/bin/uv" venv --python 3.12 .venv
+"$TOOLS/bin/uv" pip install .
+.venv/bin/readtrial doctor
+```
+
+`doctor` changes nothing. Exit 0 means the inspected prerequisites are ready;
+1 means a prerequisite is missing or the route is unsupported; 2 means an error
+or invalid arguments. Readiness is not full isolation attestation: every LXC
+trial must still pass namespace and quota enforcement checks. On macOS, doctor
+checks the designated trusted account, not container isolation. On native
+Windows it exits 1 and explains the Linux VM route and lack of Sandbox support.
+Follow its printed instructions
+on the **controller**, then rerun it. Installing LXD or changing group membership
+requires administrator access and may require a new login.
+Ubuntu may include an LXD bootstrap launcher without LXD itself. Doctor reports
+that as missing and prints the explicit install command; it never runs the
+bootstrap installer for you.
+Inside a target created or prepared by `readtrial run`, missing LXD is expected:
+stop there; never expose a host
+socket or create nested infrastructure to bypass isolation.
+
+Once LXD and login access are ready, follow doctor's storage instruction even if
+it still exits 1 for missing size limits. Create a size-capped pool, rerun doctor,
+and start a trial only after doctor exits 0:
+
+```sh
+.venv/bin/readtrial setup-linux --yes
+.venv/bin/readtrial doctor
+.venv/bin/readtrial run . --target lxc:ubuntu:24.04 --lxc-pool readtrial --agent-command 'claude -p --model claude-haiku-5-5' --check 'python3 -m readtrial --help' --out trial-results/isolated
+.venv/bin/readtrial leftovers trial-results/isolated/target-1/.isolation/journals
+```
+
+Install/authenticate the Claude CLI on the controller before the trial; credentials
+stay there. A completed trial removes its exact container automatically. For an
+interrupted trial, inspect leftovers, then use `readtrial recover JOURNALS --yes`
+with that same journal directory. Recovery preserves unknown resources and journals.
+
+Setup prints its plan and refuses changes without `--yes`. Default storage is a
+30 GiB LXD-managed btrfs loop file that persists after reboot. Use `--size-gib 10`,
+`--pool another-name`, or `--location /absolute/new-loop-file.img` to customize it;
+pass a custom pool to trials with `--lxc-pool`. Existing pools are preserved:
+use an already suitable pool, or choose a new name if `readtrial` exists.
+Nested Linux containers may lack loop devices, so they cannot create this pool.
+Doctor and setup explain that case: use a real Linux host or VM, or have its
+administrator provide a quota-capable LXD pool. A `dir` pool cannot enforce the
+required root size limit; do not expose host devices or sockets to bypass it.
+After all trials finish, undo only a pool you created with this setup:
+
+```sh
+lxc storage delete readtrial
+```
+
+## Dedicated macOS test account
+
+Use a separate **standard account** on a Mac you own for trusted README trials.
+This reduces access to other users' private files; it is still trusted
+SSH execution. Use a VM for untrusted code. The Linux controller performs real
+trials; the Mac runner works with stock Python 3.9 and never changes users.
+
+`doctor --target ssh:readtrial-mac --test-user trialuser` changes nothing and
+checks the actual SSH identity, private primary group, sudo denial, and refused
+opens of other user homes and SSH keys. An unknown result prevents trial upload.
+It always prints the following setup steps, including when the account is ready.
+Do not recreate an existing account.
+
+Dedicated macOS account setup (administrator performs steps 1-3):
+
+1. In an administrator Terminal, create a NEW standard account and its own group.
+   If this account already exists, skip creation and use doctor to verify it.
+   Remote Login must already be enabled by the administrator. Do not change services.
+
+```sh
+TRIAL_USER=trialuser
+TRIAL_GROUP="${TRIAL_USER}grp"
+TRIAL_HOME=/Users
+TRIAL_HOME="$TRIAL_HOME/$TRIAL_USER"
+if id "$TRIAL_USER" >/dev/null 2>&1; then echo 'Account exists; run doctor instead'; exit 1; fi
+if dscl . -read "/Groups/$TRIAL_GROUP" >/dev/null 2>&1; then echo 'Group exists; choose a new name'; exit 1; fi
+TRIAL_GID=$(dscl . -list /Groups PrimaryGroupID | awk 'BEGIN {m=500} $2+0>m {m=$2} END {print m+1}')
+sudo dscl . -create "/Groups/$TRIAL_GROUP"
+sudo dscl . -create "/Groups/$TRIAL_GROUP" PrimaryGroupID "$TRIAL_GID"
+sudo sysadminctl -addUser "$TRIAL_USER" -fullName 'README trial' -GID "$TRIAL_GID" -home "$TRIAL_HOME" -shell /bin/sh -password -
+sudo dscl . -create "$TRIAL_HOME" PrimaryGroupID "$TRIAL_GID"
+sudo chown "$TRIAL_USER:$TRIAL_GROUP" "$TRIAL_HOME"
+sudo chmod 700 "$TRIAL_HOME"
+# No -admin flag. Do not add this account to admin or wheel.
+# If Remote Login allows selected users, add only this user to its existing SSH group:
+sudo dseditgroup -o edit -a "$TRIAL_USER" -t user com.apple.access_ssh
+```
+
+2. On the Linux controller, make a trial-only key (choose a NEW filename):
+
+```sh
+mkdir -p -m 700 .scratch/mac-key
+ssh-keygen -t ed25519 -N '' -f .scratch/mac-key/id_ed25519
+cat .scratch/mac-key/id_ed25519.pub
+```
+
+   Copy that one PUBLIC key into the following administrator-side Terminal block:
+
+```sh
+TRIAL_USER=trialuser
+TRIAL_GROUP="${TRIAL_USER}grp"
+TRIAL_HOME=/Users
+TRIAL_HOME="$TRIAL_HOME/$TRIAL_USER"
+printf 'Paste the trial public key line, then press Enter: '
+read -r TRIAL_PUBLIC_KEY
+sudo install -d -m 700 -o "$TRIAL_USER" -g "$TRIAL_GROUP" "$TRIAL_HOME/.ssh"
+printf 'restrict %s\n' "$TRIAL_PUBLIC_KEY" | sudo tee -a "$TRIAL_HOME/.ssh/authorized_keys" >/dev/null
+sudo chown "$TRIAL_USER:$TRIAL_GROUP" "$TRIAL_HOME/.ssh/authorized_keys"
+sudo chmod 600 "$TRIAL_HOME/.ssh/authorized_keys"
+```
+
+   On the controller, replace your-mac with the Mac's hostname or IP address:
+
+```sh
+ssh -i .scratch/mac-key/id_ed25519 -o PasswordAuthentication=no trialuser@your-mac 'id; test "$(id -u)" != 0'
+# Check the displayed host key fingerprint with the administrator.
+# Add an SSH alias using this key so later commands select the same account:
+TRIAL_KEY_PATH="$PWD/.scratch/mac-key/id_ed25519"
+cat >> "$HOME/.ssh/config" <<SSH_CONFIG
+Host readtrial-mac
+    HostName your-mac
+    User trialuser
+    IdentityFile "$TRIAL_KEY_PATH"
+    IdentitiesOnly yes
+    PasswordAuthentication no
+SSH_CONFIG
+# This verifies key authentication; server-side password policy belongs to the administrator.
+```
+
+3. Sudo policy audit. A password prompt from sudo -n -l is NOT proof of denial.
+   From the supplied readtrial checkout on the Mac, using stock Python 3.9:
+
+```sh
+sudo /usr/bin/python3 readtrial/account.py --test-user trialuser --yes
+```
+
+   With Python 3.11+, the equivalent CLI is readtrial attest-sudo --test-user
+   trialuser --yes (also administrator-only).
+
+   This checks sudo -l -U, changes no policy, and creates a root-owned denial file
+   in the test home, valid for 24 hours. It refuses ambiguous/allowed policy.
+   It refuses to overwrite an existing file. To renew, the administrator removes
+   only "$TRIAL_HOME/.readtrial-sudo-denied.json" from step 1, then repeats the audit.
+   Other users must ensure their home and .ssh deny this test account;
+   doctor checks refusal without reading their contents. Resolve failed checks
+   as the administrator; readtrial never changes other users' permissions.
+
+4. From the Linux controller checkout:
+
+```sh
+python3 -m readtrial doctor --target ssh:readtrial-mac --test-user trialuser
+python3 -m readtrial run ./your-trusted-repo --target ssh:readtrial-mac --dedicated-account --trusted-target --agent-command 'claude -p --model claude-haiku-5-5' --check 'python3 -m unittest discover -s tests -q' --out trial-results/mac-first
+```
+
+Use only trusted repositories. A fresh HOME/XDG/tmp/cache/tools is made under the
+test account's home for each trial. Commands never switch users. Network access,
+world-readable files, and the test account's original home remain reachable.
+Pre/post guards hash pre-existing test-home files and verify other-user access refusal.
+Cleanup removes only the exact journaled owned directory and start-verified process
+groups. It preserves unknown paths/PIDs and reports INCOMPLETE on guard failure.
+macOS has no pidfd: start verification cannot guarantee a race-free hostile-code
+boundary. Escaped process groups cannot be attributed reliably. Use a VM for that.
+
+If you also want to run readtrial's help or local doctor on the test account,
+start in the supplied readtrial checkout under that account's home. Stock Python
+3.9 cannot run the full controller. Install uv only into a fresh test folder:
+
+```sh
+TEST_TOOLS="$HOME/agent-tests/readtrial-tools-$(date +%Y%m%d%H%M%S)"
+mkdir -p -m 700 "$TEST_TOOLS/tmp" "$TEST_TOOLS/bin" "$TEST_TOOLS/config" "$TEST_TOOLS/data" "$TEST_TOOLS/state"
+export TMPDIR="$TEST_TOOLS/tmp" UV_CACHE_DIR="$TEST_TOOLS/cache" UV_PYTHON_INSTALL_DIR="$TEST_TOOLS/python"
+export XDG_CONFIG_HOME="$TEST_TOOLS/config" XDG_DATA_HOME="$TEST_TOOLS/data" XDG_STATE_HOME="$TEST_TOOLS/state" XDG_CACHE_HOME="$TEST_TOOLS/cache"
+export UV_TOOL_DIR="$TEST_TOOLS/tools" UV_TOOL_BIN_DIR="$TEST_TOOLS/bin" UV_PYTHON_BIN_DIR="$TEST_TOOLS/pybin" UV_NO_CONFIG=1 UV_PYTHON_INSTALL_BIN=0
+export PYTHONDONTWRITEBYTECODE=1
+curl -LsSf https://astral.sh/uv/install.sh -o "$TEST_TOOLS/install-uv.sh"
+UV_INSTALL_DIR="$TEST_TOOLS/bin" UV_NO_MODIFY_PATH=1 sh "$TEST_TOOLS/install-uv.sh"
+"$TEST_TOOLS/bin/uv" run --no-project --python 3.12 python -m readtrial --help
+"$TEST_TOOLS/bin/uv" run --no-project --python 3.12 python -m readtrial doctor --test-user trialuser
+```
+
+The administrator audit above runs with stock Python 3.9 and imports only the
+standard library, so it needs no administrator-side installation. The Python 3.11+
+controller also offers `readtrial attest-sudo --test-user trialuser --yes`.
+Only administrators perform account setup; repository trial commands run
+through the standard test account.
+
+Each trial journals an exact new directory directly under the account's home.
+Its HOME, XDG configuration/data/cache/state, temporary files, downloaded Python,
+and tools stay there. Process identity (PID, UID, group, start time) is saved on
+the controller before command execution. Cleanup verifies it before signaling;
+an unexpected PID, altered journal, changed directory identity, or unowned file
+is preserved and reported INCOMPLETE. Pre/post manifests hash pre-existing
+account-home files without following symlinks. Changed files are reported and
+preserved. Other-user access refusal is checked before and after cleanup.
+
+The original test-account home and its keys remain accessible to that account.
+The network and world-readable host files remain accessible. macOS lacks pidfd;
+start-time checks have a small race, and escaped process groups cannot be
+reliably attributed. This mode cannot enforce aggregate memory, disk, CPU, or
+process-count quotas, and it does not attest all other-user files.
 
 ## First real trial
 
@@ -116,7 +349,7 @@ python3 -m readtrial run https://github.com/example/project --target lxc:ubuntu:
 ```
 
 Use `--lxc-pool POOL` when multiple pools exist. Use
-`--instance-prefix owner-trial-` to recognize your instances; only exact owned
+`--instance-prefix sample-trial-` to recognize your instances; only exact owned
 names are deleted. `--dry-run` on run/rerun prints the configuration and planned
 actions without fetching, calling an agent, creating output, or contacting a target. A fresh unprivileged container has
 no inherited profiles, NIC, home mounts, credentials, or container sockets.
@@ -124,6 +357,70 @@ Bootstrap installs Git, curl, Python, bubblewrap, certificates, and util-linux, 
 adding Python venv support. This preserves stock prerequisite failures.
 An exact-domain loopback proxy supplies package/repository access; no NIC provides
 a direct network route. Unsupported isolation or quota setup fails INCOMPLETE.
+
+## Environment, preservation and leftovers
+
+Every Linux trial gets fresh mode-0700 HOME, XDG config/data/cache/state, temp,
+cache and tool directories inside its disposable workspace. All commands and
+independent checks share those roots; another trial starts with new empty roots.
+uv installation/Python/cache/tools remain below the workspace and config loading
+is disabled. Environment redirection supplements the container boundary.
+
+The controller records pre/post manifests for its uv executable (or absence),
+the source bundle, and optional explicit benign local paths. Use
+`--protected-path ./synthetic-config` or `--readonly-input ./synthetic-input` to
+add a file or directory. These options do not mount anything into a target.
+Manifests compare presence, entry names, file type, permissions, UID/GID,
+filesystem identity, timestamps, size, extended metadata/ACL digests and SHA-256 digests. Unsafe symlinks,
+special files, unreadable required paths, changed inputs or failed postchecks
+produce INCOMPLETE. Pre-existing files are never restored or removed.
+These checks cover only the declared controller-local set, and cannot prove
+that no transient writes occurred. On SSH they do not certify the remote host.
+
+Before LXC creation, quota readiness checks reject unknown drivers and a `dir`
+pool without an ext4/XFS project-quota mount. Driver capability is recorded
+separately from independent enforcement proof. Before repository commands, the
+owned instance must pass expanded-config, guest-kernel and actual namespace
+read-back checks: no profiles, only the exact root/proxy devices, an isolated
+unprivileged user mapping, no NIC or direct route, finite CPU/RAM/PID limits,
+a capped workspace, read-only system mounts and process limits. Unknown or
+mismatched evidence fails INCOMPLETE. A configured root size alone is not
+evidence that its quota was exercised. Each LXC trial additionally requires a
+bounded owned-file write to stop with EDQUOT while shared storage has independent
+headroom; the probe is removed before source commands. Insufficient headroom,
+a root ceiling above 4 GiB, or an inconclusive probe yields INCOMPLETE. Shared storage/profiles
+are never adjusted to make preflight pass.
+
+Each target has a durable mode-0600 write-ahead journal under
+`target-1/.isolation/journals` in the mode-0700 output tree. LXC creation and
+transport writes record exact identities before mutation; LXC instances carry
+an identity tag. Cleanup checks the exact tag before deletion and confirms the
+exact instance absent. A mismatched tag leaves the resource untouched and
+produces INCOMPLETE. A killed controller can leave resources; inspect them with:
+
+```sh
+python3 -m readtrial leftovers trial-results/container/target-1/.isolation/journals
+```
+
+Discovery only reads journals and checks exact recorded identities. It does not
+search or remove resources by prefix. Malformed or unsafe journals are refused;
+unknown or ambiguous resources stay unresolved. For LXC an absent instance also
+proves its recorded HOME/control paths absent. Explicit `readtrial recover JOURNALS --yes` deletes only exact LXC identities
+after rechecking their ownership tags, then verifies absence; repeat recovery is
+harmless. It preserves original journals and refuses unknown/ambiguous resources.
+It never kills host processes or sweeps by prefix. SSH/OCI resource discovery
+can report unknown and does not certify cleanup.
+
+`result.json` and `run.json` distinguish requested policy from observed effective
+capabilities, quota readiness, guard comparison, cleanup and unresolved leftovers.
+Unverified fields are not enforcement proof. Saved run schema 2 retains protection
+paths and isolation requirements on rerun; older schemas require a new run.
+`--dry-run` prints the plan without asserting any effective capability.
+
+Browser profiles, credentials and device access are forbidden in general policy.
+Operators can add `--denied-endpoint example.invalid:45678`; these endpoints stay
+in local run configuration. Visible URL inspection is an additional refusal rule,
+not an OS boundary against computed addresses or child code.
 
 ## Trusted macOS and Windows SSH targets
 
@@ -137,7 +434,7 @@ Windows needs Git, PowerShell, and `taskkill`; cmd as the SSH shell is supported
 The runner creates a new work folder under the user's temp directory (`mktemp -d`
 on macOS; a unique PowerShell directory under `%TEMP%` on Windows). It supplies
 fresh HOME/temp paths and disables Git credential helpers/hooks during cloning.
-No owner software or system prerequisite is installed by setup.
+No existing user software or system prerequisite is installed by setup.
 
 ```sh
 python3 -m readtrial run ./your-repo --target ssh:your-mac --trusted-target --agent-command 'claude -p --model claude-haiku-5-5' --check 'python3 script.py --help' --out trial-results/mac
@@ -150,7 +447,7 @@ no host tools: all proposed commands pass through this runner and are logged.
 
 | Target | Isolation level | Filesystem/cwd | Network | Resource/cleanup controls |
 | --- | --- | --- | --- | --- |
-| Linux LXC | Confined, unprivileged container plus namespace | Private writable workspace; read-only system mounts | Exact repository/registry proxy, no NIC | CPU/RAM/process/disk ceilings; time/output bounds; verified deletion |
+| Linux LXC | Confined, unprivileged container plus namespace | Restricted writable workspace; read-only system mounts | Exact repository/registry proxy, no NIC | CPU/RAM/process/disk ceilings; time/output bounds; verified deletion |
 | Linux SSH | Explicit acknowledgement; user permissions; **not confined** | Fresh clone and HOME/temp; visible escapes refused | URL inspection only; **no network isolation** | Time/output bounds; tracked process-group cleanup and owned-folder removal; no RAM/disk/CPU quota |
 | macOS SSH | Trusted mode only; user permissions | Commands start in clone; visible escapes refused; **no OS confinement** | Explicit URL/host inspection only; **no network isolation** | Time/output bounds, process-group kill; verified owned-folder/process cleanup; **no memory/disk/CPU quota** |
 | Windows SSH | Trusted mode only; user permissions | Commands start in clone; visible escapes refused; **no OS confinement** | Explicit URL/host inspection only; **no network isolation** | Time/output bounds, `taskkill /T`; verified owned-folder/process cleanup; **no memory/disk/CPU quota or Job Object isolation** |
@@ -197,7 +494,7 @@ at top-level `&&`, `||`, `;` and pipes, inspected segment by segment, and refuse
 with the offending segment number and reason. Venv activation and pip rewrites
 work inside compounds. Arbitrary download-and-execute chains remain refused. An official POSIX
 `. "$HOME/.local/bin/env"` follow-up is replaced by an owned uv binary check;
-the runner already puts `<WORKDIR>/bin` first on the child PATH. No owner PATH or
+the runner already puts `<WORKDIR>/bin` first on the child PATH. No existing PATH or
 shell profile is edited. Original proposed commands remain in the evidence log.
 Rewrite rows contain the executed rewrite's real exit code and segment evidence;
 they are not extra successes for the unexecuted original text.
@@ -209,7 +506,7 @@ Every child gets forced `UV_PYTHON_INSTALL_DIR`, `UV_CACHE_DIR`, `UV_TOOL_DIR`,
 Plain `python -m venv` uses a relative folder; bare `pip install` or
 `python -m pip install` is redirected to the clone's `.venv` interpreter.
 The child PATH includes that venv's bin/Scripts directory. pip requires a venv
-and ignores owner configuration. Missing venvs still fail; none is silently made.
+and ignores existing user configuration. Missing venvs still fail; none is silently made.
 PyPI package installs and an HTTPS `git clone` of the exact repository under test
 into a relative child folder are accepted. Installation environment overrides,
 system/user installs, alternate indexes, global uv tools/self-update, shell profile
@@ -219,7 +516,7 @@ credential, browser and system-package deny list remains in force.
 An allowance does not change the target boundary. All SSH targets use user
 permissions and have unrestricted subprocess networking; only explicit URLs are inspected.
 LXC's no-NIC proxy adds exact uv/Python distribution hosts (`astral.sh`,
-`github.com`, `release-assets.githubusercontent.com`, `objects.githubusercontent.com`,
+`releases.astral.sh`, `github.com`, `release-assets.githubusercontent.com`, `objects.githubusercontent.com`,
 `downloads.python.org`) alongside its existing repository/registry domains.
 HTTPS CONNECT checks host/port/public address, not encrypted URL paths. The exact
 installer URL restriction is command inspection. Trusted targets inspect explicit
@@ -252,10 +549,10 @@ disabled; web search is disabled and the CLI runs without a daemon in an empty
 working directory. Codex 0.162.0 marks Luna as `tool_mode=code_mode_only`; that
 model metadata overrides `features.code_mode_only=false`. Disabling only the
 host left unusable Code Mode calls and confused the agent. readtrial reads the
-installed bundled catalog without networking and creates a private per-invocation
+installed bundled catalog without networking and creates a restricted per-invocation
 `model_catalog_json` copy for the **same requested model**, selecting direct routing
 and removing experimental, patch and search capabilities. It then applies the tool-disabling features and
-`--output-schema`. No owner CLI configuration or model is replaced. A model absent
+`--output-schema`. No existing CLI configuration or model is replaced. A model absent
 from the installed catalog fails explicitly. Non-text tool events and unknown configuration diagnostics
 make the trial INCOMPLETE. The CLI still authenticates on the controller.
 Tool flags vary by CLI version: a refusal is a compatibility finding, never an
@@ -436,17 +733,21 @@ Rerun executes saved trusted commands: never rerun someone else's results folder
 
 ## What has been verified
 
+The following records describe earlier command/backend checks. They do not certify
+the new preservation/journal boundary or independently exercise root-quota
+enforcement. Current runs must satisfy preflight; unsupported pools return INCOMPLETE.
+
 This table describes live release-preparation runs, separate from fake unit tests.
 See [DEMO.md](DEMO.md) for outcomes and limits.
 
 | Component | Live evidence | Status |
 | --- | --- | --- |
 | Linux SSH target | Fresh Debian workspace, explicit acknowledgement, limits, command inspection, cleanup | Unconfined; trusted code only |
-| LXC target | Fresh stock Ubuntu, no profiles/NIC, proxy, resource limits, cleanup | Verified |
+| LXC target | Earlier fresh stock Ubuntu checks: no profiles/NIC, proxy, resource limits, cleanup | Earlier backend verified; current enforcement requires per-run preflight |
 | Claude Haiku 5.5 | Schema-enforced command proposals on Debian and Windows SSH | Live; scripted verdicts |
 | Codex Luna | Direct-routing restricted adapter; README commands on Ubuntu LXC and macOS SSH | Live; scripted verdicts |
 | Learning loop | Old/current public README trials, exact checks, rerun diff | Linux, macOS, Windows |
-| macOS SSH target | Stock Python 3.9.6, trusted runner, group kill, verified cleanup | Trusted mode only |
+| macOS SSH target | Stock Python 3.9.6, trusted runner, group kill, verified cleanup; dedicated-account synthetic trials with unchanged home guards and fresh roots | Trusted mode only; account provisioning and native Mac controller trials unverified |
 | Windows SSH target | cmd SSH, PowerShell runner, taskkill tree cleanup | Trusted mode only |
 | OCI target | Docker and Podman unavailable in the verification environment | Unsupported |
 | Python 3.11 and 3.14 | Managed interpreters; clean-clone unit suite and installed CLI quickstart | Verified locally |
@@ -476,13 +777,13 @@ uv run --no-project --python 3.14 python -m unittest discover -s tests -q
   Memory/disk/CPU settings apply only to Linux containers, never SSH targets.
   LXC also caps container CPU/RAM/processes and root disk growth. SSH enforces time/output bounds, not aggregate host quotas. Kill process groups on time/output limits.
 - Deny credential paths, workspace escapes, privilege escalation, administration,
-  remote commands, and reserved browser ports. No system package installation on
+  remote commands, and browser/credential/device access. No system package installation on
   SSH. LXC OS isolation is the boundary. SSH filtering supplies
   refusals only; it cannot constrain arbitrary repository code.
 - Destroy only resources created by this run, in cleanup even after failure.
   Verify removal. Cleanup failure is INCOMPLETE. Forced controller death or a lost
-  connection can leave an owned target; use its exact name from private evidence.
-- Keep raw results private: they may contain sensitive repository content. Review
+  connection can leave an owned target; use its exact name from local evidence.
+- Keep raw results confidential: they may contain sensitive repository content. Review
   and scrub them manually before sharing. See [SECURITY.md](SECURITY.md).
 
 ## Development
@@ -499,9 +800,12 @@ Optional checks: `uvx ruff check --no-cache readtrial tests` and
 ## Limits and limitations
 
 Linux controllers support confined LXC targets and explicitly acknowledged Linux/macOS/Windows
-SSH targets. Native macOS/Windows controller trials remain unverified. OCI execution is unsupported
+SSH targets. Native macOS/Windows controller trials remain unverified. Windows Sandbox has no
+readtrial backend; use a disposable Linux VM with LXC instead. Nested controllers
+without loop devices require an existing quota-capable pool; never expose host
+devices or sockets to bypass preflight. OCI execution is unsupported
 in this release-preparation environment and has no advertised quickstart.
-Private repositories, browser/UI testing, deployment, and VM orchestration are
+Repositories requiring authentication, browser/UI testing, deployment, and VM orchestration are
 unsupported. Large source bundles/histories, missing or oversized README text,
 malformed findings, and failed target setup make a trial INCOMPLETE.
 Linux SSH is not filesystem, network or aggregate host isolation. Containers share a kernel

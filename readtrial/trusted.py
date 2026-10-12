@@ -32,14 +32,15 @@ UTF8_SETTINGS = ("$OutputEncoding=New-Object Text.UTF8Encoding($false); "
                  "$PSDefaultParameterValues['Get-Content:Encoding']='utf8'; ")
 
 
-def inspect(command: str, domains: set[str], workdir: str = "", windows: bool = False, repository: str = "") -> str:
+def inspect(command: str, domains: set[str], workdir: str = "", windows: bool = False, repository: str = "",
+            denied_endpoints: set[str] | None = None) -> str:
     """Refuse visible hazards. Encoded/computed paths and child code can bypass this."""
     _, command, denial = prepare(command, workdir, windows, repository)
     if denial:
         return denial
     if workdir:
         command = re.sub(re.escape(workdir) + r"(?=[/\\]|[\s\'\";]|$)", ".", command)
-    denial = policy(command, windows=windows)
+    denial = policy(command, windows=windows, denied_endpoints=denied_endpoints)
     if denial:
         return denial
     lower = command.lower()
@@ -87,17 +88,23 @@ class TrustedSSH:
 
     def prepare(self, bundle: Path) -> None:
         t = self.target
-        if self.windows:
+        if getattr(t, 'dedicated_account', False):
+            self.create_root()
+        elif self.windows:
             script = (f"$p=Join-Path ([IO.Path]::GetTempPath()) {ps_quote(t.id)}; "
                       "if (Test-Path -LiteralPath $p) { exit 2 }; "
                       "New-Item -ItemType Directory -Path $p -ErrorAction Stop | Out-Null; $p")
         else:
             script = f'mktemp -d "${{TMPDIR:-/tmp}}/{t.id}.XXXXXX"'
-        result = t.management(self.remote(script))
-        t.base = result.output.strip()
+        if not getattr(t, 'dedicated_account', False):
+            result = t.management(self.remote(script))
+            t.base = result.output.strip()
         # Refuse unexpected shell noise/path syntax before any deletion is possible.
-        valid = (bool(re.fullmatch(r"[A-Za-z]:\\[^\r\n'\x00]*\\" + re.escape(t.id), t.base)) if self.windows else
-                 bool(re.fullmatch(r"/[^\r\n'\x00]*?/" + re.escape(t.id) + r"\.[A-Za-z0-9]+", t.base)))
+        if getattr(t, 'dedicated_account', False):
+            valid = t.base == self.observed['home'] + '/' + t.id
+        else:
+            valid = (bool(re.fullmatch(r"[A-Za-z]:\\[^\r\n'\x00]*\\" + re.escape(t.id), t.base)) if self.windows else
+                     bool(re.fullmatch(r"/[^\r\n'\x00]*?/" + re.escape(t.id) + r"\.[A-Za-z0-9]+", t.base)))
         if not valid:
             from .targets import TargetError
             raise TargetError("unexpected owned temporary directory path")
@@ -105,12 +112,15 @@ class TrustedSSH:
         if self.windows:
             q = ps_quote(t.base)
             upload = (f"$ProgressPreference='SilentlyContinue'; $p={q}; "
-                      "foreach ($n in @('repo','home','tmp','control','bin')) { New-Item -ItemType Directory -Path (Join-Path $p $n) | Out-Null }; "
+                      "foreach ($n in @('repo','home','tmp','control','bin','python','cache','tools','home/config','home/data','home/cache','home/state')) { New-Item -ItemType Directory -Path (Join-Path $p $n) | Out-Null }; "
                       f"[IO.File]::WriteAllBytes((Join-Path $p 'source.bundle'), [Convert]::FromBase64String('{base64.b64encode(bundle.read_bytes()).decode()}')); exit 0\n")
             t.management(t.prefix + ["powershell -NoProfile -NonInteractive -Command -"], data=upload.encode())
         else:
             q = shlex.quote(t.base)
-            upload = f"chmod 700 {q}; mkdir {q}/repo {q}/home {q}/tmp {q}/control {q}/bin; cat > {q}/source.bundle"
+            directories = ('repo', 'home', 'tmp', 'control', 'bin', 'python', 'cache',
+                           'tools', 'home/config', 'home/data', 'home/cache', 'home/state')
+            owned_paths = ' '.join(shlex.quote(t.base + '/' + name) for name in directories)
+            upload = f"umask 077; chmod 700 {q}; mkdir {owned_paths}; cat > {q}/source.bundle"
             t.management(self.remote(upload), data=bundle.read_bytes())
         clone = (f"git -c core.hooksPath=NUL -c credential.helper= clone {ps_quote(t.base + '/source.bundle')} ." if self.windows else
                  f"git -c core.hooksPath=/dev/null -c credential.helper= clone {shlex.quote(t.base + '/source.bundle')} .")
@@ -122,7 +132,8 @@ class TrustedSSH:
     def command(self, command: str, *, setup: bool = False, timeout: float | None = None) -> Result:
         t = self.target
         started = time.monotonic()
-        denial = "" if setup else inspect(command, t.domains, t.base, self.windows, t.repository)
+        denial = "" if setup else inspect(command, t.domains, t.base, self.windows, t.repository,
+                                         getattr(t, 'denied_endpoints', set()))
         budget = min(timeout if timeout is not None else t.limits.command_seconds, t.deadline - time.monotonic())
         if denial:
             result = Result(126, "", 0, denied=denial)
@@ -131,14 +142,7 @@ class TrustedSSH:
         else:
             runnable = command if setup else prepare(command, t.base, self.windows, t.repository)[0]
             self.sequence += 1
-            script = self.windows_script(runnable, budget, guard=not setup) if self.windows else self.mac_script(runnable, budget, guard=not setup)
-            if self.windows:
-                argv = t.prefix + ["powershell -NoProfile -NonInteractive -Command -"]
-                encoded_script = base64.b64encode(script.encode("utf-16le")).decode()
-                data = (UTF8_SETTINGS + "$ProgressPreference='SilentlyContinue'; & ([ScriptBlock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('" + encoded_script + "')))); exit 0\n").encode()
-            else:
-                argv, data = self.remote(script), b""
-            transport = execute(argv, data=data, timeout=budget + 10, cap=t.limits.output_bytes * 6 + 4096)
+            transport = self.transport(runnable, budget, guard=not setup)
             try:
                 value = json.loads(transport.output)
                 if "output_b64" in value:
@@ -162,6 +166,17 @@ class TrustedSSH:
         result.seconds = round(time.monotonic() - started, 3)
         t.log("setup" if setup else "command", command, result)
         return result
+
+    def transport(self, runnable: str, budget: float, *, guard: bool) -> Result:
+        t = self.target
+        script = self.windows_script(runnable, budget, guard=guard) if self.windows else self.mac_script(runnable, budget, guard=guard)
+        if self.windows:
+            argv = t.prefix + ["powershell -NoProfile -NonInteractive -Command -"]
+            encoded_script = base64.b64encode(script.encode("utf-16le")).decode()
+            data = (UTF8_SETTINGS + "$ProgressPreference='SilentlyContinue'; & ([ScriptBlock]::Create([Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('" + encoded_script + "')))); exit 0\n").encode()
+        else:
+            argv, data = self.remote(script), b""
+        return execute(argv, data=data, timeout=budget + 10, cap=t.limits.output_bytes * 6 + 4096)
 
     def path_guard(self, command: str) -> str:
         """Resolve visible paths on the target, never against controller files."""

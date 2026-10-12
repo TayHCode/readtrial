@@ -9,7 +9,7 @@ shell = importlib.import_module(".shell", __package__) if __package__ else impor
 
 UV_SH = 'https://astral.sh/uv/install.sh'
 UV_PS = 'https://astral.sh/uv/install.ps1'
-DOWNLOAD_DOMAINS = {'astral.sh', 'github.com', 'release-assets.githubusercontent.com',
+DOWNLOAD_DOMAINS = {'astral.sh', 'releases.astral.sh', 'github.com', 'release-assets.githubusercontent.com',
                     'objects.githubusercontent.com', 'downloads.python.org'}
 
 
@@ -19,7 +19,14 @@ def quote_ps(value: str) -> str:
 
 def environment(workdir: str, windows: bool = False) -> dict[str, str]:
     separator = '\\' if windows else '/'
-    return {'UV_INSTALL_DIR': workdir + separator + 'bin', 'UV_NO_MODIFY_PATH': '1',
+    home = workdir + separator + 'home'
+    return {'HOME': home, 'TMPDIR': workdir + separator + 'tmp',
+            'TMP': workdir + separator + 'tmp', 'TEMP': workdir + separator + 'tmp',
+            'XDG_CONFIG_HOME': home + separator + 'config',
+            'XDG_DATA_HOME': home + separator + 'data',
+            'XDG_CACHE_HOME': home + separator + 'cache',
+            'XDG_STATE_HOME': home + separator + 'state',
+            'UV_INSTALL_DIR': workdir + separator + 'bin', 'UV_NO_MODIFY_PATH': '1',
             'UV_PYTHON_INSTALL_DIR': workdir + separator + 'python',
             'UV_CACHE_DIR': workdir + separator + 'cache',
             'UV_TOOL_DIR': workdir + separator + 'tools',
@@ -63,9 +70,9 @@ def prepare_segment(command: str, workdir: str, windows: bool = False, repositor
         return 'test -x ' + shlex.quote(workdir + '/bin/uv'), 'true', ''
     if not windows and re.fullmatch(r'(?:\.|source)\s+\.?/?\.venv/bin/activate', text):
         return 'test -x ./.venv/bin/python', 'true', ''
-    if not re.match(r'(?i)^(?:echo|printf|Write-Output)\s', text) and re.search(r'(?i)(?:\b(?:UV_\w+|PIP_\w+|VIRTUAL_ENV|PATH)\s*\+?=|\$env:(?:UV_\w+|PIP_\w+|VIRTUAL_ENV|PATH)\s*\+?=|\bset(?:x)?\s+(?:PATH|UV_\w+|PIP_\w+))', text):
+    if not re.match(r'(?i)^(?:echo|printf|Write-Output)\s', text) and re.search(r'(?i)(?:\b(?:UV_\w+|PIP_\w+|XDG_\w+|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PATH)\s*\+?=|\$env:(?:UV_\w+|PIP_\w+|XDG_\w+|HOME|USERPROFILE|APPDATA|LOCALAPPDATA|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PATH)\s*\+?=|\bset(?:x)?\s+(?:PATH|HOME|XDG_\w+|TMPDIR|TMP|TEMP|UV_\w+|PIP_\w+))', text):
         return command, command, 'runner installation environment or PATH override'
-    if re.search(r'(?i)\b(?:unset|env\s+-u|Set-Item|Remove-Item|SetEnvironmentVariable)\b[^;\n]*(?:UV_\w+|PIP_\w+|VIRTUAL_ENV|PATH)', text):
+    if re.search(r'(?i)\b(?:unset|env\s+-u|Set-Item|Remove-Item|SetEnvironmentVariable)\b[^;\n]*(?:UV_\w+|PIP_\w+|XDG_\w+|HOME|TMPDIR|TMP|TEMP|VIRTUAL_ENV|PATH)', text):
         return command, command, 'runner installation environment removal or override'
     if re.search(r'(?i)\b(?:curl|wget|irm|iwr|Invoke-WebRequest|Invoke-RestMethod)\b', text) and re.search(r'[|;\n]|&&|\$\(|`', text):
         return command, command, 'arbitrary downloaded script execution'

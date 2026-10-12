@@ -15,6 +15,23 @@ class InstallerTests(unittest.TestCase):
     winfolder = 'C:\\Temp\\readtrial-owned'
     repo = 'https://github.com/example/project'
 
+    def test_official_uv_redirect_host_allowed_without_wildcard_or_private_addresses(self):
+        import socket
+        from readtrial.proxy import Proxy, approved
+        proxy = Proxy(set())
+        try:
+            public = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('.'.join(['1'] * 4), 443))]
+            with patch('readtrial.proxy.socket.getaddrinfo', return_value=public):
+                self.assertEqual(approved('releases.astral.sh', 443, proxy.domains), public)
+                with self.assertRaises(ValueError):
+                    approved('other.astral.sh', 443, proxy.domains)
+            private = [(socket.AF_INET, socket.SOCK_STREAM, 6, '', ('.'.join(map(str, (127, 0, 0, 1))), 443))]
+            with patch('readtrial.proxy.socket.getaddrinfo', return_value=private):
+                with self.assertRaises(ValueError):
+                    approved('releases.astral.sh', 443, proxy.domains)
+        finally:
+            proxy.server.server_close()
+
     def test_posix_official_installer_rewritten(self):
         run, policy, denial = prepare('curl -LsSf ' + UV_SH + ' | sh', self.folder)
         self.assertEqual(denial, '')
@@ -150,8 +167,8 @@ class InstallerTests(unittest.TestCase):
                         'git clone ' + self.repo + ' .'):
             self.assertTrue(prepare(command, self.folder, repository=self.repo)[2], command)
 
-    def test_reserved_ports_include_9226(self):
-        for port in range(9222, 9227):
+    def test_unapproved_debugging_endpoints_denied(self):
+        for port in (45678, 34567):
             self.assertTrue(inspect('curl http://localhost:' + str(port), set()))
 
     def test_fake_runner_executes_rewrite_and_logs_original(self):

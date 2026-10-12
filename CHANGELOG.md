@@ -1,14 +1,6 @@
 # Changelog
 
-## 0.1.0 — 2026-10-09
-
-- Initial standalone release with a JSON-only weak-agent CLI protocol.
-- Fresh LXC, confined SSH and optional local-container target lifecycles.
-- Bounded command evidence and script-only success checks.
-- Advisory findings, Markdown reports and rerun finding diffs.
-- Standard-library runtime; unittest suite with fake targets and agents.
-
-## Unreleased — hardening
+## 0.2.0 — 2026-10-12
 
 - Unwrap one serialized command action, log corrective retries separately, and
   recover from one malformed response before stopping a trial.
@@ -50,5 +42,24 @@
 
 - Work-folder official uv installers are rewritten and validated, managed Python
   and cache/tool destinations are forced local, and pip installs require a work
-  venv. Child PATH includes owned bin and venv executables; browser ports 9222–9226
-  remain refused. Stranger trials stop at the first offline README goal.
+  venv. Child PATH includes owned bin and venv executables; browser/credential/device access
+  remains refused. Stranger trials stop at the first offline README goal.
+
+- Linux isolation preflight, fresh HOME/XDG roots, preservation manifests,
+  durable ownership journals, exact LXC recovery and explicit quota-pool setup.
+- Dedicated macOS standard-account checks, administrator sudo-denial attestation,
+  home guards and controller-journaled process identity with bounded cleanup.
+  This remains trusted mode: no network confinement or aggregate resource quotas.
+- OS isolation table and disposable Linux VM instructions for Windows; Windows
+  Sandbox is unsupported because it has no target backend. Doctor reports the
+  supported route without querying or enabling Windows features.
+- README shell-fence commands validated against the real CLI parser. Native
+  macOS/Windows controller trials and account provisioning remain unverified.
+
+## 0.1.0 — 2026-10-09
+
+- Initial standalone release with a JSON-only weak-agent CLI protocol.
+- Fresh LXC, trusted unconfined SSH and optional local-container lifecycles.
+- Bounded command evidence and script-only success checks.
+- Advisory findings, Markdown reports and rerun finding diffs.
+- Standard-library runtime; unittest suite with fake targets and agents.

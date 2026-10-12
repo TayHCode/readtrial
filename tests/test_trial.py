@@ -328,10 +328,12 @@ class PolicyTests(unittest.TestCase):
         import importlib.util
 
         import readtrial.installers
+        import readtrial.isolation
         import readtrial.process
         spec = importlib.util.spec_from_file_location("target_worker", Path(__file__).parents[1] / "readtrial" / "worker.py")
         cls.worker = importlib.util.module_from_spec(spec)
-        with patch.dict(sys.modules, {"process": readtrial.process, "installers": readtrial.installers}):
+        with patch.dict(sys.modules, {"process": readtrial.process, "installers": readtrial.installers,
+                                     'isolation': readtrial.isolation}):
             spec.loader.exec_module(cls.worker)
 
     def test_fake_secret_path_denied(self):
@@ -350,8 +352,8 @@ class PolicyTests(unittest.TestCase):
     def test_service_change_on_container_denied(self):
         self.assertTrue(self.worker.policy("systemctl restart app", True))
 
-    def test_browser_ports_denied(self):
-        self.assertTrue(self.worker.policy("curl localhost:9222"))
+    def test_browser_debugging_denied(self):
+        self.assertTrue(self.worker.policy("chromium --remote-debugging-port=45678"))
 
     def test_normal_command_allowed(self):
         self.assertEqual(self.worker.policy("python3 -m venv .venv"), "")
