@@ -1,64 +1,26 @@
 {
-  "exclude": [],
-  "approvals": [
-    {
-      "scope": "tree",
-      "kind": "ipv4",
-      "path": "readtrial/targets.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    },
-    {
-      "scope": "tree",
-      "kind": "ipv4",
-      "path": "readtrial/proxy.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    },
-    {
-      "scope": "tree",
-      "kind": "ipv4",
-      "path": "tests/test_trial.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    },
-    {
-      "scope": "history",
-      "kind": "ipv4",
-      "path": "readtrial/targets.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    },
-    {
-      "scope": "history",
-      "kind": "ipv4",
-      "path": "readtrial/proxy.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    },
-    {
-      "scope": "history",
-      "kind": "ipv4",
-      "path": "tests/test_trial.py",
-      "fingerprint": "12ca17b49af22894",
-      "reason": "Standard loopback address used for the isolated proxy and a runtime-only negative test, not a private machine address."
-    }
+  "exclude": [
+    ".scratch/"
   ],
+  "approvals": [],
   "quickstart": [
     {
       "file": "README.md",
-      "line": 89,
+      "line": 104,
       "argv": [
         "python",
         "-m",
         "pip",
         "install",
+        "--no-index",
+        "--no-deps",
+        "--no-build-isolation",
         "."
       ]
     },
     {
       "file": "README.md",
-      "line": 25,
+      "line": 38,
       "argv": [
         "python3",
         "--version"
@@ -66,7 +28,7 @@
     },
     {
       "file": "README.md",
-      "line": 26,
+      "line": 39,
       "argv": [
         "python3",
         "-m",
@@ -76,7 +38,7 @@
     },
     {
       "file": "README.md",
-      "line": 90,
+      "line": 105,
       "argv": [
         "readtrial",
         "--help"
@@ -84,7 +46,7 @@
     },
     {
       "file": "README.md",
-      "line": 27,
+      "line": 40,
       "argv": [
         "python3",
         "-m",
@@ -93,6 +55,91 @@
         "--out",
         "trial-results/demo"
       ]
+    },
+    {
+      "file": "README.md",
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "verify",
+        ".",
+        "--requirements",
+        "examples/verify-requirements.json",
+        "--scripted-plan",
+        "examples/verify-plan.json",
+        "--model",
+        "scripted-verifier",
+        "--builder-model",
+        "sample-builder",
+        "--source-hash",
+        "0000000000000000000000000000000000000000000000000000000000000000",
+        "--trusted-local",
+        "--independent-agent",
+        "--keep-running",
+        "--out",
+        "trial-results/verify-demo"
+      ],
+      "line": 817
+    },
+    {
+      "file": "README.md",
+      "line": 889,
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "verify",
+        ".",
+        "--requirements",
+        "examples/standin-passing-requirements.json",
+        "--job",
+        "examples/verify-passing-job.json",
+        "--builder-model",
+        "sample-builder",
+        "--agent-command",
+        "python3 examples/standin_agent.py",
+        "--trusted-local",
+        "--independent-agent",
+        "--out",
+        "trial-results/agent-demo/run"
+      ]
+    },
+    {
+      "file": "README.md",
+      "line": 904,
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "validate-verify",
+        "trial-results/agent-demo/run/verify.json",
+        "--job",
+        "examples/verify-passing-job.json"
+      ]
+    },
+    {
+      "file": "README.md",
+      "argv": [
+        "python3",
+        "-m",
+        "readtrial",
+        "verify",
+        ".",
+        "--requirements",
+        "examples/honest-failure-requirements.json",
+        "--job",
+        "examples/honest-failure-job.json",
+        "--builder-model",
+        "sample-builder",
+        "--agent-command",
+        "python3 examples/standin_agent.py",
+        "--trusted-local",
+        "--independent-agent",
+        "--out",
+        "trial-results/honest-proof"
+      ],
+      "line": 924
     }
   ],
   "checks": [
@@ -108,7 +155,7 @@
         "-q"
       ],
       "file": "README.md",
-      "line": 28
+      "line": 41
     },
     {
       "role": "syntax",

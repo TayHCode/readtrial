@@ -20,6 +20,8 @@ class Result:
     truncated: bool = False
     denied: str = ""
     steps: list[dict] = field(default_factory=list)
+    execution_error: str = ""
+    execution_mode: str = "shell"
 
     def json(self) -> dict:
         return asdict(self)
@@ -27,13 +29,14 @@ class Result:
 
 def execute(argv: Sequence[str], *, timeout: float = 60, cap: int = 65536,
             data: bytes = b"", cwd: str | None = None,
-            env: Mapping[str, str] | None = None, pass_fds: tuple[int, ...] = ()) -> Result:
+            env: Mapping[str, str] | None = None, pass_fds: tuple[int, ...] = (),
+            tempdir: str | None = None) -> Result:
     """Drain output while capping storage; terminate the entire process group."""
     started = time.monotonic()
     output = bytearray()
     timed_out = truncated = False
     # A file avoids deadlock if a child writes output before reading stdin.
-    with tempfile.TemporaryFile() as source:
+    with tempfile.TemporaryFile(dir=tempdir) as source:
         source.write(data)
         source.seek(0)
         try:
@@ -41,7 +44,8 @@ def execute(argv: Sequence[str], *, timeout: float = 60, cap: int = 65536,
                                     stderr=subprocess.STDOUT, cwd=cwd, env=env,
                                     start_new_session=True, pass_fds=pass_fds)
         except OSError as exc:
-            return Result(127, friendly_error(exc), time.monotonic() - started)
+            return Result(127, friendly_error(exc), time.monotonic() - started,
+                          execution_error='process spawn failed')
         assert proc.stdout is not None
         os.set_blocking(proc.stdout.fileno(), False)
         try:

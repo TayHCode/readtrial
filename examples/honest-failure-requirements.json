@@ -1,0 +1,13 @@
+[
+  {
+    "id": "honest-demo",
+    "text": "honest_failure exits with code 1 and output containing Recorded 2 requirements.",
+    "expect_exit": [
+      1
+    ]
+  },
+  {
+    "id": "recorded-gaps",
+    "text": "gaps exits with code 0 and output containing multiplication:."
+  }
+]

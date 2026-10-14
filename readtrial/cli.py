@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import asdict
 from pathlib import Path
 
@@ -44,6 +45,26 @@ def parser() -> argparse.ArgumentParser:
                           ("memory-mb", 512), ("disk-mb", 1024), ("cpu-seconds", 300), ("max-steps", 20)):
         start.add_argument("--" + flag, type=positive, default=default)
     start.add_argument("--out", required=True, type=Path, help="new restricted output directory")
+    verification = sub.add_parser('verify', help='independently exercise a trusted local product and save Factory proof')
+    verification.add_argument('project', type=Path, help='local Git project; uses committed HEAD in a fresh copy')
+    verification.add_argument('--requirements', required=True, type=Path, help='JSON array of {id, text, optional expect_exit, optional not_verifiable_in_sandbox reason}')
+    verification.add_argument('--job', type=Path, help='optional job: stage verify, route.model, source_hash, required_check_ids, evidence_dir, optional recipe')
+    verification.add_argument('--model', help='exact verifier model id (or job.route.model)')
+    verification.add_argument('--builder-model', required=True, help='recorded builder model; must differ from verifier')
+    verification.add_argument('--source-hash', help='SHA256 source fingerprint supplied by caller (or job.source_hash)')
+    backend = verification.add_mutually_exclusive_group(required=True)
+    backend.add_argument('--agent-command', help='same trusted, tool-disabled agent CLI policy as run')
+    backend.add_argument('--scripted-plan', type=Path, help='offline rehearsal actions, requires model scripted-verifier; no model calls')
+    verification.add_argument('--trusted-local', action='store_true', help='acknowledge user permissions, no filesystem/network confinement')
+    verification.add_argument('--independent-agent', action='store_true', help='attest this verifier did not build the product')
+    verification.add_argument('--recipe', type=Path, help='saved recipe.json, including Factory recipe/source_hash wrapper')
+    verification.add_argument('--keep-running', action='store_true', help='require the owned launch process to stay alive between steps')
+    verification.add_argument('--out', required=True, type=Path, help='new private evidence folder; Factory: beneath job.evidence_dir')
+    for flag, default in (('command-seconds', 60), ('total-seconds', 600), ('output-bytes', 65536), ('max-steps', 80)):
+        verification.add_argument('--' + flag, type=positive, default=default)
+    validation = sub.add_parser('validate-verify', help='check result shape, job binding and proof hashes; never decide a gate')
+    validation.add_argument('result', type=Path, help='finished verify.json')
+    validation.add_argument('--job', required=True, type=Path, help='verify job with required_check_ids')
     diagnostic = sub.add_parser('doctor', help='read-only isolation prerequisite checks; exit 0 ready, 1 missing, 2 error')
     diagnostic.add_argument('--test-user', default='', help='designated dedicated standard macOS trial account')
     diagnostic.add_argument('--target', default='', help='probe a dedicated macOS account through ssh:USER@HOST or ssh:ALIAS')
@@ -72,7 +93,55 @@ def parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     root = parser()
     args = root.parse_args(argv)
+    if args.mode == 'validate-verify':
+        from .verify_result import validate_result
+        try:
+            count = validate_result(args.result, json.loads(args.job.read_text()))
+        except (ValueError, OSError, KeyError, TypeError) as exc:
+            reason = friendly_error(exc) if isinstance(exc, OSError) else str(exc)
+            print('Invalid verify result: ' + ' '.join(reason.splitlines()))
+            return 2
+        print('Valid verify result: ' + str(count) + ' checks; shape and proof hashes match the job.')
+        return 0
     try:
+        if args.mode == 'verify':
+            from .verify import PlanAgent, verify
+            job = json.loads(args.job.read_text()) if args.job else {}
+            if args.job and job.get('stage') != 'verify':
+                raise ValueError('--job must describe a verify job')
+            items = json.loads(args.requirements.read_text())
+            required = job.get('required_check_ids')
+            if items == []:
+                items = [{'id': 'smoke', 'text': 'Invoke the product and observe successful startup.'}]
+            if required and 'regression-smoke' in required and not any(item.get('id') == 'regression-smoke' for item in items):
+                items.append({'id': 'regression-smoke', 'text': 'Invoke the real product in local isolated state and prove it still starts.'})
+            recipe_path = args.recipe or job.get('recipe')
+            recipe = json.loads(Path(recipe_path).read_text()) if recipe_path else None
+            model = args.model or job.get('route', {}).get('model')
+            source_hash = args.source_hash or job.get('source_hash')
+            if args.job and (model != job.get('route', {}).get('model') or source_hash != job.get('source_hash')):
+                raise ValueError('model and source hash overrides must match the supplied job')
+            if job.get('evidence_dir'):
+                boundary = Path(job['evidence_dir']).resolve()
+                if boundary not in args.out.absolute().resolve().parents:
+                    raise ValueError('--out must be a new folder beneath job.evidence_dir')
+            backend_options = {}
+            if args.scripted_plan:
+                if model != 'scripted-verifier':
+                    raise ValueError('--scripted-plan requires --model scripted-verifier; it cannot impersonate a model')
+                backend_options['agent_factory'] = lambda template, limits, **options: PlanAgent(args.scripted_plan, limits, **options)
+            evidence, code = verify(args.project, items, args.out, model=model,
+                                    builder_model=args.builder_model, source_hash=source_hash,
+                                    agent_command=args.agent_command or 'scripted-plan', trusted_local=args.trusted_local,
+                                    independent_agent=args.independent_agent, recipe=recipe,
+                                    keep_running=args.keep_running, required_check_ids=required,
+                                    limits=Limits(command_seconds=args.command_seconds, total_seconds=args.total_seconds,
+                                                  output_bytes=args.output_bytes, max_steps=args.max_steps), **backend_options)
+            print(str(args.out.absolute() / 'verify.json'))
+            print('Recorded ' + str(len(evidence['checks'])) + ' requirements; Factory decides gate passage.')
+            for problem in evidence.get('tool_problems', []):
+                print(problem['tool'] + ': ' + problem['problem'], file=sys.stderr)
+            return code
         if args.mode == 'doctor':
             from .setup import doctor
             report = doctor(test_user=args.test_user, target=args.target)

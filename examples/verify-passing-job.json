@@ -1,0 +1,7 @@
+{
+  "stage": "verify",
+  "route": {"model": "offline-standin"},
+  "source_hash": "1111111111111111111111111111111111111111111111111111111111111111",
+  "required_check_ids": ["addition"],
+  "evidence_dir": "trial-results/agent-demo"
+}

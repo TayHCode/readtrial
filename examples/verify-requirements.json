@@ -1,0 +1,4 @@
+[
+  {"id": "increment", "text": "Adding three returns a counter value of three."},
+  {"id": "retain", "text": "Reading again retains the value and uses the same live instance."}
+]

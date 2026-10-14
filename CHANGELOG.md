@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.3.0 — 2026-10-14
+
+Compared with public 0.2.0:
+
+- Add `verify`/`validate-verify`, reusable launch/readiness/cleanup recipes, hashed
+  source-bound command proof, declared nonzero exits and explicit sandbox gaps.
+- Fix Claude schema adaptation, quote preservation, stale-recipe handling and
+  bounded diagnostics. Build/install offline with a standard-library backend
+  instead of requiring setuptools.
+- Record proof for the exact `. .venv/bin/activate` shell segment, retaining
+  failure checks and refusing arbitrary source/execution wrappers.
+- Permit SECURITY.md fixture text while still refusing the macOS `security`
+  executable. Remove obsolete IP approval entries from the scan manifest.
+- No public commands, files or user features are removed. The setuptools build
+  dependency is removed; the existing README trial interface remains available.
+
+Further changes included in this release:
+
+- Declare accepted `expect_exit` lists in requirements, command proposals and
+  recipe phases; bind declarations and exact matches to private proof. Keep
+  legacy singleton proposals compatible and reject overrides and undeclared failures.
+- Record explicit sandbox evidence limitations without fabricated command failures;
+  document owner-side checks for original-skill comparison and private project records.
+- Allow vault-kit product commands while retaining credential CLI/token refusals.
+- Explain simple-command proof restrictions to the verifier and provide corrective
+  feedback when an attempted command cannot prove behavior.
+
+- Add independent product verification with private command proof and reusable
+  launch, readiness and cleanup recipes.
+- Wrap Claude action unions in an object schema; require a recipe before product
+  commands and correct premature proposals once. Keep offline agents compatible.
+- Preserve decoded shell quotes and backslashes, and report bounded redacted CLI
+  errors in terminal output and saved evidence.
+- Mark failed startup recipes invalid instead of rebasing them to new source.
+- Explain how Factory records establish tool use and distinguish fallback.
+
 ## 0.2.0 — 2026-10-12
 
 - Unwrap one serialized command action, log corrective retries separately, and

@@ -1,0 +1,12 @@
+[
+  {
+    "id": "v2-r9",
+    "text": "Compare the verification design against the original verification skill.",
+    "not_verifiable_in_sandbox": "The original reference is unavailable inside the fresh source copy; the owner must review it against VERIFY-DESIGN.md externally."
+  },
+  {
+    "id": "v2-r10",
+    "text": "Confirm project records establish completed verification through readtrial.",
+    "not_verifiable_in_sandbox": "Private project receipts and evidence are outside the source copy; the owner must inspect them externally."
+  }
+]

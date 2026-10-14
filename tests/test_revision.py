@@ -92,7 +92,8 @@ class ProtocolTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder, patch.dict('os.environ', {'FAKE_TOKEN': token}), patch('readtrial.trial.execute', return_value=Result(2, token + 'z' * 2000, 0)), self.assertRaises(AgentError) as caught:
             Agent('fake', Limits()).ask({}, 5, Path(folder))
         self.assertNotIn(token, str(caught.exception))
-        self.assertIn('[response omitted]', str(caught.exception))
+        self.assertIn('[redacted]', str(caught.exception))
+        self.assertIn('[truncated]', str(caught.exception))
         self.assertLess(len(str(caught.exception)), 1300)
 
     def test_native_tool_event_no_retry(self):

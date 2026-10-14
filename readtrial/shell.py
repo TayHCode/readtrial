@@ -8,7 +8,82 @@ import shlex
 from pathlib import Path
 
 
-def split(command: str, windows: bool = False) -> tuple[list[str], list[str]]:
+EXECUTION_WRAPPERS = {'sh', 'bash', 'dash', 'zsh', 'ksh', 'csh', 'tcsh', 'fish', 'busybox',
+                      'env', 'timeout', 'nice', 'nohup', 'xargs', 'eval', 'exec', 'command', '.', 'source'}
+
+
+def direct_argv(command: str) -> list[str] | None:
+    """Recognize literal external argv, without shell expansions or builtins."""
+    quote = ''
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == '\\' and quote != "'":
+            if index + 1 == len(command) or command[index + 1] == '\n':
+                return None
+            # POSIX double quotes remove these backslashes; shlex preserves
+            # them. Let the shell interpret the original text instead.
+            if quote == '"' and command[index + 1] in '$`':
+                return None
+            index += 2
+            continue
+        if quote == "'":
+            if char == "'":
+                quote = ''
+        elif quote:
+            if char in '$`':
+                return None
+            if char == quote:
+                quote = ''
+        elif char in "\"'":
+            quote = char
+        elif char in '\r\n;&|()<>{}*?[]~`$#':
+            return None
+        index += 1
+    if quote:
+        return None
+    words = shlex.split(command)
+    builtins = {':', '.', 'alias', 'bg', 'break', 'cd', 'command', 'continue', 'echo', 'eval', 'exec',
+                'exit', 'export', 'false', 'fc', 'fg', 'getopts', 'hash', 'jobs', 'kill', 'local',
+                'printf', 'pwd', 'read', 'readonly', 'return', 'set', 'shift', 'source', 'test',
+                'times', 'trap', 'true', 'type', 'ulimit', 'umask', 'unalias', 'unset', 'wait',
+                'if', 'then', 'else', 'elif', 'fi', 'for', 'while', 'until', 'do', 'done', 'case',
+                'esac', 'in', 'time', '!'}
+    if (not words or words[0] in builtins or posixpath.basename(words[0]) in EXECUTION_WRAPPERS
+            or '=' in words[0]):
+        return None
+    return words
+
+
+def trim_segment(command: str, windows: bool = False) -> str:
+    """Remove surrounding shell whitespace, preserving quoted/escaped bytes."""
+    if windows:
+        return command.strip()
+    start = 0
+    while start < len(command) and command[start] in ' \t\n':
+        start += 1
+    quote = ''
+    index = end = start
+    while index < len(command):
+        char = command[index]
+        if char == '\\' and quote != "'":
+            index = min(index + 2, len(command))
+            end = index
+            continue
+        if quote:
+            if char == quote:
+                quote = ''
+            end = index + 1
+        elif char in "\"'`":
+            quote = char
+            end = index + 1
+        elif char not in ' \t\n':
+            end = index + 1
+        index += 1
+    return command[start:end]
+
+
+def split(command: str, windows: bool = False, *, reject_opaque: bool = False) -> tuple[list[str], list[str]]:
     segments: list[str] = []
     operators: list[str] = []
     quote = ''
@@ -41,7 +116,7 @@ def split(command: str, windows: bool = False) -> tuple[list[str], list[str]]:
                 continue
             if op == '&':
                 raise ValueError('background commands are unsupported; use one foreground command')
-            segment = command[start:index].strip()
+            segment = trim_segment(command[start:index], windows)
             if segment:
                 segments.append(segment)
                 operators.append(';' if op == '\n' else op)
@@ -53,7 +128,7 @@ def split(command: str, windows: bool = False) -> tuple[list[str], list[str]]:
         index += 1
     if quote or depth:
         raise ValueError('unbalanced shell quoting or grouping')
-    final = command[start:].strip()
+    final = trim_segment(command[start:], windows)
     if final:
         segments.append(final)
     elif operators:
@@ -65,8 +140,35 @@ def split(command: str, windows: bool = False) -> tuple[list[str], list[str]]:
     # Control structures are opaque units. Their internals need separate proposals
     # for independent step evidence; do not rewrite their grammar.
     if not windows and any(re.match(r'^(?:if|then|else|elif|fi|for|while|until|do|done|case|esac)\b', s) for s in segments):
+        if reject_opaque:
+            raise ValueError('opaque shell control flow cannot prove execution')
         return [command], []
     return segments, operators
+
+
+def opaque_syntax(command: str) -> bool:
+    """Nested shell code has no independent status witness in this protocol."""
+    quote = ''
+    index = 0
+    while index < len(command):
+        char = command[index]
+        if char == '\\' and quote != "'":
+            index += 2
+            continue
+        if quote == "'":
+            if char == "'":
+                quote = ''
+        elif char == '`' or command[index:index + 2] == '$(':
+            return True
+        elif quote:
+            if char == quote:
+                quote = ''
+        elif char in "\"'":
+            quote = char
+        elif char in '({<>':
+            return True
+        index += 1
+    return False
 
 
 def denied(index: int, segment: str, reason: str) -> str:
@@ -126,15 +228,17 @@ def path_policy(command: str, root: Path | None = None, windows: bool = False) -
 
 def posix_script(command: str, status: str) -> str:
     segments, operators = split(command)
+    def record(index):
+        # Expand $? before starting the observer. Its positional arguments and
+        # variables live in a child shell; no assignment touches the user's shell.
+        # Returning the observed status preserves $? and && / || semantics.
+        logger = f"printf '{index}:%s\\n' \"$1\" >> {status} || exit 125; exit \"$1\""
+        return '(/bin/sh -c ' + shlex.quote(logger) + ' readtrial-status "$?")'
     if len(segments) == 1:
-        # Still record a single opaque shell's status separately from later output.
-        return ('sh -c ' + shlex.quote(command) + '; rt_code=$?; '
-                f"printf '1:%s\\n' \"$rt_code\" >> {status}; exit \"$rt_code\"")
+        return command + '\n' + record(1)
     output = []
     for index, segment in enumerate(segments, 1):
-        output.append('{\n' + segment + '\nrt_code=$?\n' +
-                      f"printf '{index}:%s\\n' \"$rt_code\" >> {status}\n" +
-                      '(exit "$rt_code")\n}')
+        output.append('{\n' + segment + '\n' + record(index) + '\n}')
         if index <= len(operators):
             output.append(operators[index - 1])
     return ' '.join(output)
@@ -150,6 +254,8 @@ def statuses(text: str, command: str, windows: bool = False) -> list[dict]:
         index, code = map(int, match.groups())
         if not 1 <= index <= len(segments):
             raise ValueError('unknown step-status index')
+        if any(row['segment'] == index for row in result):
+            raise ValueError('duplicate step-status index')
         result.append({'segment': index, 'command': segments[index - 1], 'exit_code': code})
     return sorted(result, key=lambda step: step['segment'])
 

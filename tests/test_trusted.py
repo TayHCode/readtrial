@@ -65,6 +65,13 @@ class TrustedTests(unittest.TestCase):
         for command in ['curl https://pypi.org/simple/', 'git clone https://github.com/example/repo', 'python3 -m venv .venv', 'py -3 script.py --help']:
             self.assertEqual(inspect(command, {'github.com'}, repository='https://github.com/example/repo'), '')
 
+    def test_security_document_is_data_but_keychain_executable_is_refused(self):
+        self.assertEqual(inspect("python3 -c \"open('SECURITY.md', 'w').write('# Security')\"", set()), '')
+        for command in ('security find-generic-password', './security find-generic-password',
+                        'true && security dump', 'true; security dump'):
+            with self.subTest(command=command):
+                self.assertEqual(inspect(command, set()), 'privilege or system change')
+
     def test_computed_paths_not_claimed_confined(self):
         # This is deliberately allowed: source code can construct arbitrary paths.
         self.assertEqual(inspect("python3 -c 'print(1)'", set()), '')

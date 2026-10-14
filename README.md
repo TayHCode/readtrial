@@ -101,9 +101,14 @@ managed interpreter instead. readtrial never installs system prerequisites on SS
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
-python -m pip install .
+python -m pip install --no-index --no-deps --no-build-isolation .
 readtrial --help
 ```
+
+This optional installation uses the included standard-library build backend.
+A fresh venv needs only pip, with no network or preinstalled setuptools.
+`python3 scripts/check_offline_install.py` checks committed HEAD in a clean clone
+and fresh venv, runs all declared steps, and keeps its evidence in `.scratch/`.
 
 ## Isolated trials
 
@@ -584,8 +589,8 @@ action is unwrapped before execution and annotated only when unwrapping occurred
 another malformed reply receives one
 corrective retry rather than ending the trial immediately. Completion without any README command is a protocol error. Every
 adapter failure is reported as `agent-protocol-error:` with a bounded scrubbed
-diagnosis; raw CLI envelopes and session/usage metadata are omitted from errors
-and stored agent evidence. Target temporary paths are abbreviated as `<WORKDIR>`
+diagnosis. CLI failures include up to 480 characters of redacted provider error
+text, omitting session/usage metadata. Target temporary paths are abbreviated as `<WORKDIR>`
 in commands.jsonl, including Windows account directories. Plain CLI progress is ignored. Codex router argument-decoding rejections
 (`failed to parse function arguments:`) are harmless diagnostics: the handler did
 not run, and a usable final JSON action is still required. Other router errors
@@ -786,6 +791,209 @@ uv run --no-project --python 3.14 python -m unittest discover -s tests -q
 - Keep raw results confidential: they may contain sensitive repository content. Review
   and scrub them manually before sharing. See [SECURITY.md](SECURITY.md).
 
+## Verify a finished product
+
+`verify` is a separate mode alongside the existing README trial. A fresh verifier
+uses the product's documented CLI or command-driven API, observes each current
+requirement and records proof. It takes a local Git project and a JSON array of
+`{"id": "feature-id", "text": "required behavior"}` entries. It uses committed
+HEAD, so commit the finished product first; uncommitted files and build outputs
+are excluded. Install or build inside the fresh copy through the launch recipe.
+
+The local mode requires POSIX, Git, and explicit `--trusted-local` consent:
+commands run with your user's permissions. It creates a fresh source copy,
+HOME, TMPDIR and XDG state; it drops inherited product credentials and applies
+the README runner's visible-command refusals, time limits, output caps and process
+group cleanup. Normal SIGINT/SIGTERM interruption also runs cleanup. This is **not filesystem or network confinement**, and it has no
+aggregate memory, CPU or disk quota. Use trusted projects on a disposable machine.
+The existing README mode still requires its supported disposable targets.
+
+This offline counter rehearsal launches one process, adds three, reads three
+from the same instance, then stops it and hashes transcripts. Scripted observations
+are predefined; inspect the outputs. It makes no model/network calls, and its
+placeholder source fingerprint is only for demonstration. Use a committed checkout.
+
+```sh
+python3 -m readtrial verify . --requirements examples/verify-requirements.json --scripted-plan examples/verify-plan.json --model scripted-verifier --builder-model sample-builder --source-hash 0000000000000000000000000000000000000000000000000000000000000000 --trusted-local --independent-agent --keep-running --out trial-results/verify-demo
+```
+
+Always choose a new output folder. To repeat that run, keep the same inputs and
+add `--recipe trial-results/verify-demo/recipe.json` with a new `--out`.
+Saved recipes retain their source hash; a changed hash is recorded and readiness
+is retried against the new copy. Readiness must exercise the product. Failed
+readiness saves `validated: false` with the failure. Unusable saved commands
+(shape, policy, syntax or availability) are retained in `unusable-recipe.json`
+and replaced through the agent; previously invalid recipes also get a fresh
+proposal. Executed readiness failures remain unverified. See the protocol for
+the wrapper and complete reuse contract.
+
+For live verification, replace `--scripted-plan` with an authenticated
+`--agent-command 'claude -p --model VERIFIER_MODEL'` or
+`--agent-command 'codex exec -m VERIFIER_MODEL'`. The model must match the job and
+differ from the builder. Native tools are disabled. Live calls may cost money.
+Custom agents and offline plans return bare actions; Claude uses an object root
+`{"action": ...}`. The first call permits only a recipe, enforced before commands.
+
+Propose `{requirement_id, command, expect_exit: [0]}` before execution.
+`expect_exit` lists accepted integer exits (0–255); `[0]` is the default.
+A requirement may declare `expect_exit: [1]`, `[2]`, or `[1, 2]`; its commands
+inherit that exact list and cannot override it. Otherwise a command proposal may
+declare its own list before execution. The older `expected_exit_code: 1` remains
+supported as a singleton; do not supply both fields. Then report
+`{requirement_id, status, observed, reason}`. Matching non-zero exits can prove
+behavior; an undeclared non-zero or any active mismatch fails proof.
+Proof binds `expect_exit`, actual exit and match; the legacy scalar field is null
+for multiple exits. Recipe phases accept `{command: "...", expect_exit: [1]}`;
+strings expect [0]. Readiness, cleanup and completed launches must match; a kept
+launch must stay alive. Every compound segment must execute with exit 0 or a
+declared exit, and its final shell exit must match. Prefer simple commands.
+
+This offline example proves intentional exits 1 and 2:
+
+```sh
+python3 -m readtrial verify . --requirements examples/expected-exit-requirements.json --scripted-plan examples/expected-exit-plan.json --model scripted-verifier --builder-model sample-builder --source-hash 0000000000000000000000000000000000000000000000000000000000000000 --trusted-local --independent-agent --out trial-results/expected-exits
+```
+
+Observations can select `proof_steps: [2]` and supersede an earlier attempt with
+`superseded: [{"step": 1, "reason": "Corrected path."}]`. Each needs a later matching
+replacement; all attempts stay recorded. Refusals and controller limits never
+prove behavior. Finish with `{done: true, not_checked: ["gaps or none"]}`.
+See [the protocol](VERIFY-PROTOCOL.md) for complete action and proof rules.
+
+`--keep-running` requires a live owned launch. Cleanup terminates its process
+group, runs owned-state cleanup and removes the copy even after failures.
+Failed cleanup invalidates observations; proof retains lifecycle evidence.
+
+A requirement can declare `not_verifiable_in_sandbox: "reason"`; it stays
+unverified with `blocked_by: "sandbox"`, no commands and no product exit.
+For v2-r9 the owner compares the original skill with VERIFY-DESIGN.md externally;
+for v2-r10 the owner reviews private project receipts and evidence externally.
+Neither limitation proves product failure or success. Both stay in `not_checked`.
+See [sandbox examples](examples/sandbox-requirements.json) and the protocol.
+The local copy provides no OS confinement.
+
+Exit codes: 0 means all requested observations have successful command proof;
+1 means some requirement remains unverified (including declared sandbox limitations) or startup failed; 2 means the runner,
+provider, protocol or cleanup failed. These statuses do not decide a Factory gate.
+
+### Offline reactive agent example
+
+This offline stand-in uses `--agent-command`, reads README/requirements/history
+on stdin, chooses documented commands and compares actual numeric JSON output.
+It demonstrates the protocol; independent judgement needs a real model.
+Omit `--keep-running` for this short-lived CLI. Use a committed checkout and a
+new output folder. Relative agent executables/scripts resolve from the starting
+directory or project before isolation; paths outside those roots are refused.
+
+```sh
+python3 -m readtrial verify . --requirements examples/standin-passing-requirements.json --job examples/verify-passing-job.json --builder-model sample-builder --agent-command "python3 examples/standin_agent.py" --trusted-local --independent-agent --out trial-results/agent-demo/run
+```
+
+Expect exit **0**, with `addition` verified from actual output.
+`examples/agent_product/README.md` supplies the commands, also listed here so
+this repository can be the input project:
+
+- add: `python3 examples/agent_product/product.py add 2 3`
+- multiply: `python3 examples/agent_product/product.py multiply 2 3`
+
+The sample job includes `stage: "verify"`, the exact IDs, an offline stand-in
+identity and a synthetic source fingerprint. It is an example of the wire format,
+not a real Factory job or source fingerprint. Validate the finished report with:
+
+```sh
+python3 -m readtrial validate-verify trial-results/agent-demo/run/verify.json --job examples/verify-passing-job.json
+```
+
+Expect exit **0** and one line confirming the shape, exact IDs, job model/hash and
+proof files with matching SHA-256. An unverified requirement is valid evidence.
+Validation requires complete execution detail and a hashed source/command-set
+binding with a unique run ID. Legacy proofs must be rerun; missing or unknown fields are errors.
+Resolution/spawn failures, killed processes and incomplete shell evidence cannot
+verify behavior. See [the protocol](VERIFY-PROTOCOL.md) for supported shell forms.
+This read-only check does not pass a gate, prove judgement, or replace the
+Factory's own validation. Invalid evidence exits **2** with a one-line reason.
+
+For an honest failure (undeclared as a release quickstart), use the original job
+and both requirements. Expect exit **1**: multiplication returns 5 instead of 6.
+The stand-in derives the failure from output; both requirements have proof.
+Self-verification declares `expected_exit_code: 1` before the demo runs and
+checks its recorded gaps separately. Multiplication inside remains unverified.
+Expect exit **0** from this outer run:
+
+```sh
+python3 -m readtrial verify . --requirements examples/honest-failure-requirements.json --job examples/honest-failure-job.json --builder-model sample-builder --agent-command "python3 examples/standin_agent.py" --trusted-local --independent-agent --out trial-results/honest-proof
+```
+
+Stand-in vocabulary: `OP exits with code NUMBER and output containing TEXT.`
+Commands for these requirements:
+
+- honest_failure: `python3 -m readtrial verify . --requirements examples/standin-requirements.json --job examples/verify-job.json --builder-model sample-builder --agent-command "python3 examples/standin_agent.py" --trusted-local --independent-agent --out trial-results/agent-demo/failing`
+- gaps: `python3 -c "import json; print(json.dumps(json.load(open('trial-results/agent-demo/failing/verify.json'))['not_checked']))"`
+
+The original honest-failure command (exit **1**, undeclared in release-check) is:
+
+```sh
+python3 -m readtrial verify . --requirements examples/standin-requirements.json --job examples/verify-job.json --builder-model sample-builder --agent-command "python3 examples/standin_agent.py" --trusted-local --independent-agent --out trial-results/agent-demo/failing
+```
+
+To demonstrate an obsolete startup recipe offline, run this single command with
+a new output folder (no previous demo run is needed):
+
+```sh
+python3 -m readtrial verify . --requirements examples/standin-requirements.json --job examples/verify-job.json --builder-model sample-builder --agent-command "python3 examples/standin_agent.py" --trusted-local --independent-agent --recipe examples/stale-recipe.json --command-seconds 1 --out trial-results/agent-demo/stale
+```
+
+Expect exit **1**: readiness calls a removed operation. Both requirements remain
+unverified; proof records `recipe_reused: true`, `source_changed: true`, the failed
+readiness output and cleanup. This expected failure is also undeclared as a
+release quickstart. The saved recipe has `validated: false`, so reusing it asks
+the agent for a fresh recipe. A changed source hash alone does
+not invalidate a recipe that still passes readiness.
+
+### Factory handoff
+
+Supply the approved requirements and the verifier job as private JSON inputs.
+The job must include `stage: "verify"`. It supplies `route.model`, `source_hash`,
+`required_check_ids`, optional saved `recipe` path and the private `evidence_dir`.
+Do not use a build job here; `examples/verify-job.json` shows the required fields.
+The recorded builder model comes from the caller's build record. The exact call
+has this form; substitute your private paths and recorded builder model:
+
+```sh
+python3 -m readtrial verify PROJECT --requirements requirements.json --job verify-job.json --builder-model BUILDER_MODEL --agent-command 'claude -p --model VERIFIER_MODEL' --trusted-local --independent-agent --out evidence/readtrial-run
+```
+
+Use the job's verifier model in the agent command. Put the new output folder
+beneath `job.evidence_dir`. Add `--keep-running` when the recipe launches an app;
+for short-lived CLI checks omit it. Without `--job`, supply `--model` and
+`--source-hash` explicitly. The hash must be the caller's current source
+fingerprint; readtrial does not invent or independently calculate that external
+fingerprint. An empty requirement list becomes `smoke`. A job requiring
+`regression-smoke` adds that startup requirement automatically; otherwise the ID
+set must match the job exactly.
+
+Give the Factory **`evidence/readtrial-run/verify.json`**. It records model,
+source fingerprint and commit, recipe, checks, gaps and tool problems. Each check
+has complete step results, proof selection and a private hashed artifact binding
+all requirements and commands to that source. Verified check exit codes are 0;
+actual product exits remain in step results. Unverified checks retain a reason.
+See [the evidence contract](VERIFY-PROTOCOL.md) for required fields and validation.
+`recipe.json` saves the reusable recipe. Output files use mode 600 and folders
+700. Factory checks the job route, source fingerprint, proof files and exact IDs
+and decides its own gates; readtrial does not decide gate passage.
+
+To check whether the Factory completed a real project verification through
+readtrial, inspect its private job evidence and recorded verify receipt. A tool
+run leaves the original `verify.json`, hashed per-requirement proof files and
+`recipe.json`, plus a verify receipt whose tool provenance names **readtrial**, its **version**,
+its **commit**, and the **SHA-256 of verify.json**. Compare that hash with the saved
+verify.json bytes and match the named version/commit to the tool used. Match the receipt to that evidence, job and source
+fingerprint, and check that it completed without fallback. A fallback instead
+records a runner/provider problem and explicit fallback authorization, followed
+by evidence from the plain verifier. A receipt alone, an offline demo or a toy
+CLI run does not establish that completion condition. This README does not claim
+that the Factory has completed it.
+
 ## Development
 
 ```sh
@@ -797,7 +1005,7 @@ local subprocess tests exercise bounds. Fake sensitive values are built at runti
 Optional checks: `uvx ruff check --no-cache readtrial tests` and
 `uvx mypy --ignore-missing-imports readtrial`.
 
-## Limits and limitations
+## Limitations
 
 Linux controllers support confined LXC targets and explicitly acknowledged Linux/macOS/Windows
 SSH targets. Native macOS/Windows controller trials remain unverified. Windows Sandbox has no
@@ -805,8 +1013,17 @@ readtrial backend; use a disposable Linux VM with LXC instead. Nested controller
 without loop devices require an existing quota-capable pool; never expose host
 devices or sockets to bypass preflight. OCI execution is unsupported
 in this release-preparation environment and has no advertised quickstart.
-Repositories requiring authentication, browser/UI testing, deployment, and VM orchestration are
-unsupported. Large source bundles/histories, missing or oversized README text,
+README trials requiring repository authentication, browser/UI testing, deployment, and VM orchestration are
+unsupported. Verify mode supports trusted local POSIX CLI and command-driven API journeys;
+it has no native browser, desktop UI or TUI driver, and no interactive stdin runner.
+A scripted plan proves execution only, not independent semantic judgment. Readiness
+revalidation cannot prove that an old recipe still covers every feature. SIGKILL,
+machine failure or a child that escapes its process group can leave local processes;
+use a disposable machine and inspect private proof. Visible network URLs, including
+loopback URLs, remain subject to the existing endpoint allowlist; use a documented
+product client for local API journeys. Independence relies on caller attestation
+and model identity; readtrial cannot prove who built the product. Live verify
+coverage is limited to a small Claude CLI journey. Large source bundles/histories, missing or oversized README text,
 malformed findings, and failed target setup make a trial INCOMPLETE.
 Linux SSH is not filesystem, network or aggregate host isolation. Containers share a kernel
 and are not VMs. Allowed endpoints can receive submitted repository data; a proxy
@@ -826,3 +1043,13 @@ MIT, copyright TayHCode. Concepts only from
 [quickstarted](https://github.com/snehankekre/quickstarted) (MIT), for doc-following
 and independent success scripts, and [Repo2Run](https://github.com/bytedance/Repo2Run)
 (Apache-2.0), for isolated build attempts. No code was copied; no AGPL code is included.
+
+Verify-mode ideas also come from Lauren Tan's
+[create-verification-skill in Cursor pstack](https://github.com/cursor/plugins/blob/main/pstack/skills/create-verification-skill/SKILL.md)
+([MIT licence](https://github.com/cursor/plugins/blob/main/pstack/LICENSE)):
+exercise the user interface, check usable readiness, retain one owned app between
+steps, preserve action/result proof, reuse startup instructions, report gaps and
+clean up owned state. No reference text, prompts, code or file structure was copied.
+
+See [the verification design note](VERIFY-DESIGN.md) for each idea and its file/function
+implementation. A comparison with the original needs access to that original.

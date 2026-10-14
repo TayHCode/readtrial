@@ -26,11 +26,39 @@ SCHEMA = {
 
 def scrub(text: str) -> str:
     for name, value in os.environ.items():
-        if len(value) >= 8 and (name.endswith(('_KEY', '_TOKEN', '_PASSWORD')) or name in {'HOME', 'CODEX_HOME'}):
+        if len(value) >= 8 and (name.endswith(('_KEY', '_TOKEN', '_PASSWORD', '_SECRET')) or name in {'HOME', 'CODEX_HOME'}):
             text = text.replace(value, '[redacted]')
     text = re.sub(r'https?://[^\s/@]+:[^\s/@]+@', 'https://[redacted]@', text)
     text = re.sub(r'[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}', '[redacted-address]', text)
     return text[:1200] + (' [truncated]' if len(text) > 1200 else '')
+
+
+def cli_error_text(output: str) -> str:
+    """Extract provider errors without session metadata; redact before truncating."""
+    try:
+        envelope = json.loads(output)
+    except ValueError:
+        envelopes = []
+        for line in output.splitlines():
+            try:
+                value = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(value, dict):
+                envelopes.append(value)
+        envelope = envelopes[0] if len(envelopes) == 1 else None
+    if isinstance(envelope, dict):
+        # Never dump an arbitrary provider envelope into a diagnostic.
+        output = next((envelope[key] for key in ('result', 'error', 'message')
+                       if isinstance(envelope.get(key), str)), 'CLI returned no error text')
+    output = scrub(output)
+    output = re.sub(r'(?i)\b(?:Bearer\s+|sk[-_])[A-Za-z0-9_.-]+', '[redacted-secret]', output)
+    output = re.sub(r'(?i)(\b(?:[\w-]*(?:token|password|secret|api[_-]?key))\b[\s\"\x27]*[:=][\s\"\x27]*)[^\s,;\"\x27]+',
+                    r'\1[redacted-secret]', output)
+    output = re.sub(r'(?i)(https?://[^\s?#]+)[?#][^\s]+', r'\1[redacted-query]', output)
+    output = re.sub(r'(?<![\w])[A-Za-z0-9_+/=-]{32,}(?![\w])', '[redacted-secret]', output)
+    output = ''.join(char if char.isprintable() or char in '\n\t' else '?' for char in output).strip()
+    return output[:480] + (' [truncated]' if len(output) > 480 else '') or 'CLI returned no error text'
 
 
 def normalize(value: object, *, unwrap: bool = True, notes: list[str] | None = None) -> dict:
@@ -82,7 +110,7 @@ def normalize(value: object, *, unwrap: bool = True, notes: list[str] | None = N
     return value
 
 
-def claude_response(output: str, *, notes: list[str] | None = None) -> dict:
+def claude_response(output: str, *, notes: list[str] | None = None, normalizer=normalize) -> dict:
     # CLI diagnostics may surround the JSON envelope; only one result is accepted.
     decoder = json.JSONDecoder()
     try:
@@ -98,7 +126,7 @@ def claude_response(output: str, *, notes: list[str] | None = None) -> dict:
     if value.get('is_error'):
         raise ValueError('Claude reported an error')
     if 'structured_output' in value:
-        return normalize(value['structured_output'], notes=notes)
+        return normalizer(value['structured_output'], notes=notes)
     if not isinstance(value.get('result'), str):
         raise TypeError('Claude returned no text/structured result')
-    return normalize(json.loads(value['result']), notes=notes)
+    return normalizer(json.loads(value['result']), notes=notes)

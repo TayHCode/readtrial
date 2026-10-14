@@ -1,10 +1,11 @@
 [build-system]
-requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+requires = []
+build-backend = "build_backend"
+backend-path = ["."]
 
 [project]
 name = "readtrial"
-version = "0.2.0"
+version = "0.3.0"
 description = "Try a README as a stranger; keep command evidence and deterministic verdicts."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,6 +15,3 @@ dependencies = []
 
 [project.scripts]
 readtrial = "readtrial.cli:main"
-
-[tool.setuptools]
-packages = ["readtrial"]

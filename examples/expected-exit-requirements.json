@@ -1,0 +1,17 @@
+[
+  {
+    "id": "reject-one",
+    "text": "The sample rejection prints rejected and deliberately exits 1.",
+    "expect_exit": [
+      1
+    ]
+  },
+  {
+    "id": "reject-two",
+    "text": "The alternate rejection prints invalid and exits an accepted code 2.",
+    "expect_exit": [
+      1,
+      2
+    ]
+  }
+]

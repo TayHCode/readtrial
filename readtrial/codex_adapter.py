@@ -31,7 +31,7 @@ def argv(executable: str, model: str) -> list[str]:
     return result
 
 
-def response(output: str, *, notes: list[str] | None = None) -> dict:
+def response(output: str, *, notes: list[str] | None = None, normalizer=normalize) -> dict:
     final = None
     for line in output.splitlines():
         if not line.strip().startswith("{"):
@@ -68,7 +68,7 @@ def response(output: str, *, notes: list[str] | None = None) -> dict:
     action = json.loads(final)
     if not isinstance(action, dict):
         raise TypeError("Codex action must be a JSON object")
-    return normalize(action, notes=notes)
+    return normalizer(action, notes=notes)
 
 
 def environment() -> dict[str, str]:

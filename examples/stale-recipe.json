@@ -1,0 +1,8 @@
+{
+  "recipe": {
+    "launch": "python3 examples/agent_product/product.py add 2 3",
+    "ready_check": "python3 examples/agent_product/product.py removed-operation 2 3",
+    "cleanup": "true"
+  },
+  "source_hash": "0000000000000000000000000000000000000000000000000000000000000000"
+}

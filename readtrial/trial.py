@@ -17,7 +17,7 @@ from . import codex_adapter
 from .coverage import coverage, declared_steps, succeeded
 from .identity import canonical_findings, normalized_command
 from .process import Result, execute, friendly_error
-from .protocol import COMMAND_SCHEMA, SCHEMA, claude_response, normalize, scrub
+from .protocol import COMMAND_SCHEMA, SCHEMA, claude_response, cli_error_text, normalize, scrub
 from .shell import split
 from .targets import Limits, Target, TargetError
 from .trusted import LINUX_NOTICE, NOTICE
@@ -180,13 +180,19 @@ def without_added_cd(command: str, steps: list[dict], windows: bool) -> str:
 
 
 class Agent:
-    def __init__(self, template: str, limits: Limits):
+    def __init__(self, template: str, limits: Limits, *, brief: str = BRIEF,
+                 schema: dict = SCHEMA, normalizer=normalize, require_command: bool = True,
+                 first_schema: dict | None = None):
+        self.brief, self.schema = brief, schema
+        self.first_schema = first_schema
+        self.normalizer, self.require_command = normalizer, require_command
         self.argv = shlex.split(template)
         self.limits = limits
         if not self.argv:
             raise ValueError("agent command is empty")
         self.claude = Path(self.argv[0]).name == "claude"
         self.codex = Path(self.argv[0]).name == "codex"
+        self.wrapped_claude = self.claude and any(key in schema for key in ('anyOf', 'oneOf', 'allOf'))
         if self.claude:
             # Arbitrary Claude flags can re-enable tools or load local hooks.
             # Accept only model/format/performance selections, append our policy.
@@ -200,35 +206,64 @@ class Agent:
                 index += 1 + allowed[word]
             if "-p" not in self.argv and "--print" not in self.argv:
                 self.argv.append("-p")
-            self.argv += ["--safe-mode", "--no-chrome", "--system-prompt", BRIEF,
+            self.argv += ["--safe-mode", "--no-chrome", "--system-prompt", self.brief,
                           "--tools", "", "--disable-slash-commands", "--setting-sources", "",
                           "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
                           "--no-session-persistence", "--output-format", "json",
-                          "--json-schema", json.dumps(SCHEMA)]
+                          "--json-schema", json.dumps(self.claude_schema(self.schema))]
         if self.codex:
             if len(self.argv) != 4 or self.argv[1:3] != ["exec", "-m"] or not re.fullmatch(r"[A-Za-z0-9_.-]+", self.argv[3]):
                 raise ValueError("Codex template must be exactly: codex exec -m MODEL")
             # Wrap the CLI, never accept user flags that re-enable native tools.
             self.argv = codex_adapter.argv(self.argv[0], self.argv[3])
 
+    def claude_schema(self, schema):
+        # Claude requires an object root and refuses root-level unions.
+        if self.wrapped_claude:
+            return {'type': 'object', 'additionalProperties': False,
+                    'required': ['action'], 'properties': {'action': schema}}
+        return schema
+
     def ask(self, context: dict, timeout: float, directory: Path) -> tuple[dict, Result]:
         self.retry_records: list[Result] = []
         started = time.monotonic()
-        prompt = BRIEF + "\nTARGET: " + str(context.get("platform", "Linux")) + "; " + str(context.get("shell", "POSIX sh"))
+        prompt = self.brief + "\nTARGET: " + str(context.get("platform", "Linux")) + "; " + str(context.get("shell", "POSIX sh"))
         if context.get("platform") == "Windows":
             prompt += "\nWindows PowerShell 5.1: no && or ||; use py -3, not python3. Use ; and if ($?). Read UTF-8 files with -Encoding UTF8."
             prompt += "\nFor a subdirectory use cd subdir; if ($?) { command } in one proposal."
         else:
             prompt += "\nPOSIX sh: use cd subdir && command in one proposal."
-        prompt += "\nUNTRUSTED TRIAL DATA:\n" + json.dumps(context, ensure_ascii=True)
-        action_schema = SCHEMA if context.get('history') else COMMAND_SCHEMA
-        if not context.get('history'):
+        action_schema = self.schema if context.get('history') or not self.require_command else COMMAND_SCHEMA
+        recipe_first = self.first_schema is not None and context.get('recipe') is None
+        if recipe_first:
+            action_schema = self.first_schema
+            prompt += '\nFIRST ACTION: supply only a recipe. No requirement commands or observations until a recipe is selected.'
+        if self.require_command and not context.get('history'):
             prompt += '\nFIRST ACTION: return exactly one field: {"command":"a README command"}.'
+        if self.wrapped_claude:
+            prompt += '\nFor structured output wrap exactly one action in {"action": ...}.'
+        if self.first_schema is not None and not recipe_first:
+            prompt += '\nRecipe already selected. Do not return another recipe or repeat successful commands.'
+            if context.get('next_action'):
+                prompt += '\nNEXT ACTION: ' + context['next_action']
+        prompt += "\nUNTRUSTED TRIAL DATA:\n" + json.dumps(context, ensure_ascii=True)
         if len(prompt.encode()) > 131072:
             raise AgentError("agent-protocol-error: context exceeded cap", Result(2, "context exceeded cap", 0))
         argv = [prompt if part == "{prompt}" else part for part in self.argv]
         if self.claude:
-            argv[argv.index('--json-schema') + 1] = json.dumps(action_schema)
+            argv[argv.index('--json-schema') + 1] = json.dumps(self.claude_schema(action_schema))
+        def normalize_reply(value, *, notes=None):
+            if self.wrapped_claude:
+                if not isinstance(value, dict) or set(value) != {'action'}:
+                    raise ValueError('expected exactly one wrapped action')
+                value = value['action']
+            value = self.normalizer(value, notes=notes)
+            if self.first_schema is not None:
+                if recipe_first and set(value) != {'recipe'}:
+                    raise ValueError('first action must supply only a recipe; commands cannot run before recipe selection')
+                if not recipe_first and 'recipe' in value:
+                    raise ValueError('recipe already selected; return a requirement action or completion')
+            return value
         if self.codex:
             schema = directory / "action-schema.json"
             schema.write_text(json.dumps(action_schema), encoding="utf-8")
@@ -238,21 +273,21 @@ class Agent:
                 result = Result(2, scrub(str(exc)), 0)
                 raise AgentError("agent-protocol-error: " + result.output, result) from exc
             argv += ["--output-schema", str(schema), '-c', 'model_catalog_json=' + json.dumps(str(catalog))]
-            argv += ['-c', 'developer_instructions=' + json.dumps(BRIEF + '\nNever call a native function. Return the JSON action as final text only.')]
+            argv += ['-c', 'developer_instructions=' + json.dumps(self.brief + '\nNever call a native function. Return the JSON action as final text only.')]
         correction = ''
         for attempt in range(2):
             budget = timeout - (time.monotonic() - started)
             result = execute(argv, data=prompt.encode() if "{prompt}" not in self.argv else b"",
-                             cwd=str(directory), timeout=max(.001, budget), cap=self.limits.output_bytes,
+                             cwd=str(directory), timeout=max(.001, budget), cap=self.limits.output_bytes, tempdir=str(directory),
                              env={**codex_adapter.environment(), "TMPDIR": str(directory)} if self.codex else None)
             try:
                 if result.exit_code or result.timed_out or result.truncated:
                     raise ValueError("CLI failed, timed out, or exceeded output cap")
                 notes: list[str] = []
-                value = (codex_adapter.response(result.output, notes=notes) if self.codex else
-                         claude_response(result.output, notes=notes) if self.claude else
-                         normalize(json.loads(result.output), notes=notes))
-                if value.get('done') and not context.get('history'):
+                value = (codex_adapter.response(result.output, notes=notes, normalizer=normalize_reply) if self.codex else
+                         claude_response(result.output, notes=notes, normalizer=normalize_reply) if self.claude else
+                         normalize_reply(json.loads(result.output), notes=notes))
+                if self.require_command and value.get('done') and not context.get('history'):
                     raise ValueError("done without a README command proposal")
                 annotation = ' (' + '; '.join(notes) + ')' if notes else ''
                 if attempt:
@@ -265,17 +300,23 @@ class Agent:
                 # the parser's bounded diagnosis, never the raw envelope.
                 correction = scrub(str(exc))
                 message = "agent-protocol-error: " + correction + "; returned: [response omitted]"
+                cli_failed = result.exit_code or result.timed_out or result.truncated or str(exc) == 'Claude reported an error'
+                if cli_failed:
+                    message = "agent-protocol-error: " + correction + "; CLI error: " + cli_error_text(result.output)
                 # Native tools, CLI failures, and configuration errors are never retried.
                 unsafe = self.codex and any(word in str(exc) for word in ('non-text event', 'configuration diagnostic', 'unknown event', 'turn failed'))
-                if attempt or unsafe or result.exit_code or result.timed_out or result.truncated or budget <= .01:
+                if attempt or unsafe or cli_failed or budget <= .01:
                     result.output = message
                     raise AgentError(message, result) from exc
                 self.retry_records.append(Result(result.exit_code, message + '\nPROTOCOL CORRECTION: retry once with raw shell text.', result.seconds))
                 old_prompt = prompt
                 shapes = ('{"command":"raw shell text","done":false,"findings":[]} or '
                           '{"command":null,"done":true,"findings":[...]}') if context.get('history') else '{"command":"raw shell text"}'
-                prompt += ("\nPROTOCOL CORRECTION: " + message + "\nReturn ONLY " + shapes +
-                           ". Never put JSON inside command. Findings MUST be [] while proposing a command; save them for done:true. Native tools are unavailable; the JSON command field IS your runner.")
+                if self.require_command:
+                    prompt += ("\nPROTOCOL CORRECTION: " + message + "\nReturn ONLY " + shapes +
+                               ". Never put JSON inside command. Findings MUST be [] while proposing a command; save them for done:true. Native tools are unavailable; the JSON command field IS your runner.")
+                else:
+                    prompt += "\nPROTOCOL CORRECTION: " + message + "\nReturn one action conforming to this schema: " + json.dumps(action_schema)
                 argv = [prompt if part == old_prompt else part for part in argv]
         raise AssertionError("unreachable")
 
@@ -303,20 +344,20 @@ def snapshot(repo: str, directory: Path, limits: Limits, ref: str = "") -> tuple
     git = ["git", "-c", "core.hooksPath=/dev/null", "-c", "credential.helper=",
            "-c", "protocol.ext.allow=never", "-c", "core.sshCommand=false"]
     clone = execute(git + ["clone", "--bare", "--no-hardlinks", "--no-local", repo, str(source)],
-                    timeout=limits.command_seconds, cap=limits.output_bytes, env=env)
+                    timeout=limits.command_seconds, cap=limits.output_bytes, env=env, tempdir=str(directory))
     if clone.exit_code:
         raise TargetError("source fetch failed: " + clone.output)
     if ref:
-        resolved = execute(git + ["--git-dir", str(source), "rev-parse", ref + "^{commit}"], env=env)
+        resolved = execute(git + ["--git-dir", str(source), "rev-parse", ref + "^{commit}"], env=env, tempdir=str(directory))
         if resolved.exit_code:
             raise TargetError("source ref is unavailable")
-        changed = execute(git + ["--git-dir", str(source), "update-ref", "HEAD", resolved.output.strip()], env=env)
+        changed = execute(git + ["--git-dir", str(source), "update-ref", "HEAD", resolved.output.strip()], env=env, tempdir=str(directory))
         if changed.exit_code:
             raise TargetError("cannot select source ref")
-    commit = execute(git + ["--git-dir", str(source), "rev-parse", "HEAD"], env=env)
+    commit = execute(git + ["--git-dir", str(source), "rev-parse", "HEAD"], env=env, tempdir=str(directory))
     bundle = directory / "source.bundle"
     result = execute(git + ["--git-dir", str(source), "bundle", "create", str(bundle), "HEAD"],
-                     timeout=limits.command_seconds, cap=limits.output_bytes, env=env)
+                     timeout=limits.command_seconds, cap=limits.output_bytes, env=env, tempdir=str(directory))
     if result.exit_code or bundle.stat().st_size > min(limits.disk_mb * 1024 * 1024 // 4, 64 * 1024 * 1024):
         raise TargetError("source bundle failed or exceeded 64 MiB/source disk budget")
     return bundle, commit.output.strip()

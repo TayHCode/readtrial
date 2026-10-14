@@ -1,0 +1,31 @@
+[
+  {
+    "recipe": "not applicable: short-lived rejection examples"
+  },
+  {
+    "requirement_id": "reject-one",
+    "command": "python3 -c \"import sys; print('rejected'); sys.exit(1)\""
+  },
+  {
+    "requirement_id": "reject-one",
+    "status": "verified",
+    "observed": "rejected was printed with exit 1; inspect command proof.",
+    "reason": ""
+  },
+  {
+    "requirement_id": "reject-two",
+    "command": "python3 -c \"import sys; print('invalid'); sys.exit(2)\""
+  },
+  {
+    "requirement_id": "reject-two",
+    "status": "verified",
+    "observed": "invalid was printed with exit 2; inspect command proof.",
+    "reason": ""
+  },
+  {
+    "done": true,
+    "not_checked": [
+      "These deliberate CLI exits do not prove unrelated product behavior."
+    ]
+  }
+]

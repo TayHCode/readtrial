@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 from .installers import DOWNLOAD_DOMAINS, environment, prepare
 from .process import Result, decode_output, execute
 from .proxy import REGISTRIES
-from .shell import path_requests, posix_script, powershell_script, statuses
+from .shell import split, path_requests, posix_script, powershell_script, statuses
 from .worker import policy
 
 if TYPE_CHECKING:
@@ -43,6 +43,13 @@ def inspect(command: str, domains: set[str], workdir: str = "", windows: bool = 
     denial = policy(command, windows=windows, denied_endpoints=denied_endpoints)
     if denial:
         return denial
+    # Match the macOS credential command as an executable, not document text
+    # such as SECURITY.md in a synthetic project fixture.
+    segments, _ = split(command, windows)
+    for segment in segments:
+        words = shlex.split(segment, posix=not windows)
+        if words and Path(words[0]).name.casefold() == 'security':
+            return "privilege or system change"
     lower = command.lower()
     visible_paths = re.sub(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"<>;)]+", "", command)
     if re.search(r"(?:^|[\s'\"=><;])/(?!dev/null(?:[\s'\";]|$))", visible_paths):
@@ -51,10 +58,10 @@ def inspect(command: str, domains: set[str], workdir: str = "", windows: bool = 
         return "path outside workspace or host environment"
     if re.search(r"(?i)\bcd\s+(?:/|~|\$|%)", command):
         return "path outside workspace"
-    if re.search(r"(?i)(?:-verb\s+['\"]?runas|\b(?:runas|brew|port|winget|choco|scoop|schtasks|sc\.exe|reg\.exe|security|launchctl|osascript)\b|git\s+config\s+--(?:global|system)|\b(?:kill|pkill|killall|taskkill|Stop-Process|Set-ExecutionPolicy)\b)", command):
+    if re.search(r"(?i)(?:-verb\s+['\"]?runas|\b(?:runas|brew|port|winget|choco|scoop|schtasks|sc\.exe|reg\.exe|launchctl|osascript)\b|git\s+config\s+--(?:global|system)|\b(?:kill|pkill|killall|taskkill|Stop-Process|Set-ExecutionPolicy)\b)", command):
         return "privilege or system change"
     if any(word in lower for word in ("google/chrome", "google\\chrome", "application support", "keychain",
-                                      "login data", "browser", "firefox", "msedge", "chromium", "chrome", ".gnupg", ".azure", ".npmrc", ".pypirc", "vault", "dpapi")):
+                                      "login data", "browser", "firefox", "msedge", "chromium", "chrome", ".gnupg", ".azure", ".npmrc", ".pypirc", ".vault-token", "dpapi")) or re.search(r'(?<![\w-])vault(?:\s|$)', lower):
         return "browser profile or credential store"
     for address in re.findall(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s'\"<>;)]+", command):
         try:

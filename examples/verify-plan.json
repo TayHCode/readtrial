@@ -1,0 +1,8 @@
+[
+  {"recipe": {"launch": "python3 examples/verify_product/product.py start", "ready_check": "python3 examples/verify_product/product.py ready", "cleanup": "python3 examples/verify_product/product.py cleanup"}},
+  {"requirement_id": "increment", "command": "python3 examples/verify_product/product.py add 3"},
+  {"requirement_id": "increment", "status": "verified", "observed": "The command returned the live instance identity and a counter value of three; inspect the transcript.", "reason": ""},
+  {"requirement_id": "retain", "command": "python3 examples/verify_product/product.py read"},
+  {"requirement_id": "retain", "status": "verified", "observed": "The command returned the same live instance identity and a counter value of three; inspect the transcript.", "reason": ""},
+  {"done": true, "not_checked": ["Concurrent clients, invalid input and forced controller death are outside this sample."]}
+]

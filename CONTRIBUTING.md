@@ -19,3 +19,9 @@ The release-check manifest declares the exact README install and first-run
 commands. Keep its line references synchronized when editing the README. Review
 privacy/license findings and any public attribution metadata before release;
 passing automated checks alone does not authorize publication.
+
+After committing packaging or quickstart changes, run
+`python3 scripts/check_offline_install.py`. It checks committed HEAD in a fresh
+local clone, HOME and venv with pip indexes and caches disabled, runs every
+declared quickstart/check, and verifies the installed import and entry point
+outside the checkout. Evidence and temporary files stay under `.scratch/`.
