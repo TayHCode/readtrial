@@ -303,7 +303,7 @@ class ProofIntegrityTests(unittest.TestCase):
             self.save()
             with self.assertRaises(ValueError):
                 validate_result(self.path, self.job)
-        # An edit without a refreshed digest must also fail.
+
         self.report = original
         self.save()
         path.write_text('{}')

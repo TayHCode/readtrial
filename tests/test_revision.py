@@ -139,7 +139,7 @@ class SegmentTests(unittest.TestCase):
 
     def test_exact_failure_cannot_be_masked_by_echo(self):
         result, steps = self.measured('false && echo skipped; echo EXIT=$?')
-        self.assertEqual(result.exit_code, 0)  # Original shell aggregate is preserved.
+        self.assertEqual(result.exit_code, 0)
         self.assertEqual([s['exit_code'] for s in steps], [1, 0])
         self.assertEqual(steps[0]['command'], 'false')
         self.assertIn('EXIT=1', result.output)
