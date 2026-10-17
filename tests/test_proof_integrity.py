@@ -1,6 +1,7 @@
 """Audit regressions exercised through the real CLI and a committed product."""
 import copy
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -65,6 +66,7 @@ class ProofIntegrityTests(unittest.TestCase):
     def save(self):
         self.path.write_text(json.dumps(self.report))
 
+    @unittest.skipUnless(importlib.util.find_spec('ensurepip'), 'python3-venv is not installed')
     def test_venv_activation_has_command_proof_and_missing_activation_fails(self):
         commands = ['python3 -m venv .venv',
                     '. .venv/bin/activate && python -c "import sys; print(sys.prefix); assert sys.prefix != sys.base_prefix"']

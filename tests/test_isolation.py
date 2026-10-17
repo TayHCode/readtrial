@@ -82,13 +82,14 @@ class IsolationTests(unittest.TestCase):
         protected.mkdir()
         sentinel = protected / 'sentinel'
         sentinel.write_bytes(b'alpha')
+        sentinel.chmod(0o600)
         missing = self.root / 'missing'
         before = isolation.manifest([protected, missing])
         self.assertEqual(before, isolation.manifest([protected, missing]))
         sentinel.write_bytes(b'omega')
         self.assertNotEqual(before, isolation.manifest([protected, missing]))
         sentinel.write_bytes(b'alpha')
-        sentinel.chmod(0o600)
+        sentinel.chmod(0o640)
         self.assertNotEqual(before, isolation.manifest([protected, missing]))
         missing.mkdir()
         self.assertNotEqual(before, isolation.manifest([protected, missing]))
