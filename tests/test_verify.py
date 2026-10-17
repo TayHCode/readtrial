@@ -25,6 +25,10 @@ BUILDER = 'sample-builder'
 RECIPE = json.loads((ROOT / 'examples/verify-plan.json').read_text())[0]['recipe']
 ITEMS = json.loads((ROOT / 'examples/verify-requirements.json').read_text())
 PLAN = json.loads((ROOT / 'examples/verify-plan.json').read_text())
+READY_THEN_EXIT_1 = (
+    "python3 -c \"import subprocess, sys, time; "
+    "[time.sleep(.1) for _ in iter(lambda: subprocess.run([sys.executable, 'examples/verify_product/product.py', 'ready'], "
+    "capture_output=True).returncode, 0)]; sys.exit(1)\"")
 
 
 def assert_contract(case, report, directory, ids, model=MODEL, source_hash=HASH):
@@ -189,7 +193,7 @@ class VerifyTests(unittest.TestCase):
 
     def test_recipe_readiness_and_cleanup_accept_declared_nonzero(self):
         from readtrial.verify_result import validate_result
-        recipe = {**RECIPE, 'ready_check': {'command': 'exit 1', 'expect_exit': [1]},
+        recipe = {**RECIPE, 'ready_check': {'command': READY_THEN_EXIT_1, 'expect_exit': [1]},
                   'cleanup': {'command': 'exit 2', 'expect_exit': [2]}}
         report, code = self.run_verify([{'recipe': recipe}, *PLAN[1:]])
         self.assertEqual(code, 0)
