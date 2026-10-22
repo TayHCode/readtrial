@@ -14,6 +14,7 @@ from readtrial.process import Result
 from readtrial.protocol import normalize
 from readtrial.targets import Limits
 from readtrial.trial import Agent, Evidence, run, run_target
+from platforms import posix_only
 
 
 class WindowsTarget(FakeTarget):
@@ -109,6 +110,7 @@ class RoundFourTests(unittest.TestCase):
         self.assertEqual(self.trial()['verdict'], 'INCOMPLETE')
         self.assertEqual(FakeAgent.calls, [])
 
+    @posix_only
     def test_missing_local_checks_no_output_or_agent(self):
         self.config['repo'] = str(self.root)
         self.config['checks'] = []

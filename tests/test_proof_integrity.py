@@ -16,6 +16,7 @@ from readtrial.process import execute
 from readtrial.shell import posix_script, statuses
 from readtrial.verify import verify
 from readtrial.verify_result import validate_result
+from platforms import posix_only
 
 ROOT = Path(__file__).parents[1]
 
@@ -66,6 +67,7 @@ class ProofIntegrityTests(unittest.TestCase):
     def save(self):
         self.path.write_text(json.dumps(self.report))
 
+    @posix_only
     @unittest.skipUnless(importlib.util.find_spec('ensurepip'), 'python3-venv is not installed')
     def test_venv_activation_has_command_proof_and_missing_activation_fails(self):
         commands = ['python3 -m venv .venv',
@@ -75,10 +77,12 @@ class ProofIntegrityTests(unittest.TestCase):
         self.assertEqual(self.run_product('. .venv/bin/activate', suffix='missing-venv'), 1)
         self.assertNotEqual(self.report['checks'][0]['step_results'][0]['exit_code'], 0)
 
+    @posix_only
     def test_security_document_fixture_is_writable(self):
         self.assertEqual(self.run_product("python3 -c \"from pathlib import Path; p=Path('SECURITY.md'); p.write_text('# Security\\n'); print(p.read_text())\""), 0)
         validate_result(self.path, self.job)
 
+    @posix_only
     def test_delta_finding_1_escaped_arguments_match_documented_shell(self):
         command = r'''python3 -c 'import sys; sys.exit(0 if sys.argv[1].startswith(chr(92)) else 7)' "\$value"'''
         direct = subprocess.run(['sh', '-c', command], env=self.env, capture_output=True)
@@ -95,6 +99,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 self.assertEqual(proof['commands'][0]['output'], direct.stdout)
                 validate_result(self.path, self.job)
 
+    @posix_only
     def test_delta_findings_with_empty_home_minimal_path_and_slow_git(self):
         home, programs = self.directory / 'home', self.directory / 'bin'
         home.mkdir()
@@ -130,6 +135,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 self.assertEqual(proof['commands'][0]['steps'][0]['exit_code'], 0)
                 validate_result(self.path, self.job)
 
+    @posix_only
     def test_delta_finding_2_surrounding_whitespace_keeps_valid_evidence(self):
         for index, command in enumerate((' python3 -c "print(42)" ', '\tpython3 -c "print(42)"\t',
                                          ' exit 2 ', ' printf " 42 " ',
@@ -145,6 +151,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 self.assertEqual(proof['commands'][0]['output'], direct.stdout)
                 validate_result(self.path, self.job)
 
+    @posix_only
     def test_delta_finding_3_two_failed_runs_cannot_form_a_passing_record(self):
         from readtrial.process import Result
         reports = []
@@ -196,6 +203,7 @@ class ProofIntegrityTests(unittest.TestCase):
             validate_result(path, job)
         self.assertNotEqual(reports[0]['run_id'], reports[1]['run_id'])
 
+    @posix_only
     def test_finding_1_removing_detail_cannot_relabel_failure(self):
         self.assertEqual(self.run_product('python3 -c "import sys; sys.exit(3)"'), 1)
         check = self.report['checks'][0]
@@ -207,6 +215,7 @@ class ProofIntegrityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_result(self.path, self.job)
 
+    @posix_only
     def test_finding_2_unchanged_proof_cannot_be_rebound_to_another_source(self):
         self.assertEqual(self.run_product('python3 -c "import sys; sys.exit(3)"', 3), 0)
         validate_result(self.path, self.job)
@@ -215,6 +224,7 @@ class ProofIntegrityTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_result(self.path, {**self.job, 'source_hash': 'b' * 64})
 
+    @posix_only
     def test_finding_3_missing_executable_is_not_expected_product_refusal(self):
         self.assertEqual(self.run_product('readtrial_missing_integrity_fixture', 127), 1)
         self.assertEqual(self.report['checks'][0]['status'], 'unverified')
@@ -222,6 +232,7 @@ class ProofIntegrityTests(unittest.TestCase):
         self.assertEqual(self.report['checks'][0]['step_results'][0]['execution_error'], 'process spawn failed')
         validate_result(self.path, self.job)
 
+    @posix_only
     def test_finding_4_instrumentation_preserves_user_variables_and_failure(self):
         command = 'rt_code=7; python3 -c \'import sys; sys.exit(int(sys.argv[1]))\' "$rt_code"'
         direct = subprocess.run(['sh', '-c', command], env=self.env, capture_output=True)
@@ -229,6 +240,7 @@ class ProofIntegrityTests(unittest.TestCase):
         self.assertEqual(self.run_product(command), 1)
         self.assertEqual(self.report['checks'][0]['step_results'][0]['exit_code'], 7)
 
+    @posix_only
     def test_every_required_field_and_unknown_fields_fail_closed(self):
         self.assertEqual(self.run_product('true; printf ok'), 0)
         original = copy.deepcopy(self.report)
@@ -277,6 +289,7 @@ class ProofIntegrityTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         validate_result(self.path, self.job)
 
+    @posix_only
     def test_proof_cannot_be_empty_truncated_reordered_or_edited(self):
         self.assertEqual(self.run_product('true; printf ok'), 0)
         original = copy.deepcopy(self.report)
@@ -318,6 +331,7 @@ class ProofIntegrityTests(unittest.TestCase):
         self.assertEqual(result.exit_code, 127)
         self.assertTrue(result.execution_error)
 
+    @posix_only
     def test_real_expected_nonzero_exits_including_reserved_codes_verify(self):
         for expected in (1, 3, 124, 125, 126, 127, 137, 143, 255):
             with self.subTest(expected=expected):
@@ -326,6 +340,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 self.assertEqual(self.report['checks'][0]['step_results'][0]['exit_code'], expected)
                 validate_result(self.path, self.job)
 
+    @posix_only
     def test_command_set_cannot_be_truncated_reordered_or_replaced(self):
         self.assertEqual(self.run_product(['printf first', 'printf second']), 0)
         original = copy.deepcopy(self.report)
@@ -356,6 +371,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'bound command'):
                     validate_result(self.path, self.job)
 
+    @posix_only
     def test_model_commit_and_run_labels_cannot_be_rebound(self):
         self.assertEqual(self.run_product('true'), 0)
         original = copy.deepcopy(self.report)
@@ -367,6 +383,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, 'proof binding differs'):
                     validate_result(self.path, job)
 
+    @posix_only
     def test_killed_missing_nonexecutable_and_opaque_commands_do_not_verify(self):
         cases = [('python3 signal_exit.py SIGTERM', 143), ('python3 signal_exit.py SIGKILL', 137),
                  ('./README.md', 126), ('true || printf skipped', 0),
@@ -385,6 +402,7 @@ class ProofIntegrityTests(unittest.TestCase):
                 self.assertTrue(self.report['checks'][0]['step_results'][0]['execution_error'])
                 validate_result(self.path, self.job)
 
+    @posix_only
     def test_observer_preserves_variables_environment_and_shell_status(self):
         commands = ['rt_code=7; printf "%s\\n" "$rt_code"',
                     'readonly rt_code=7; printf "%s\\n" "$rt_code"',
@@ -405,6 +423,7 @@ class ProofIntegrityTests(unittest.TestCase):
                                  (direct.returncode, direct.stdout, direct.stderr))
                 status.unlink(missing_ok=True)
 
+    @posix_only
     def test_duplicate_json_keys_and_status_records_are_errors(self):
         self.assertEqual(self.run_product('true'), 0)
         self.path.write_text(self.path.read_text().replace('"checks":', '"model": "shadow", "checks":'))

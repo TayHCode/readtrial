@@ -16,6 +16,7 @@ from unittest.mock import patch
 from readtrial.cli import main
 from readtrial.process import Result, execute
 from readtrial.verify_result import validate_result
+from platforms import posix_only
 
 ROOT = Path(__file__).parents[1]
 spec = importlib.util.spec_from_file_location('standin_agent', ROOT / 'examples/standin_agent.py')
@@ -35,6 +36,7 @@ class ScratchTests(unittest.TestCase):
 
 
 class ExampleTests(ScratchTests):
+    @posix_only
     def test_documented_honest_failure_is_proof_in_self_verification(self):
         project = self.directory / 'self-product'
         project.mkdir()
@@ -176,7 +178,7 @@ class ExampleTests(ScratchTests):
         manifest = json.loads((ROOT / 'release-check.json').read_text())
         for command in manifest['quickstart'] + manifest['checks']:
             if 'file' in command:
-                line = (ROOT / command['file']).read_text().splitlines()[command['line'] - 1]
+                line = (ROOT / command['file']).read_text(encoding='utf-8').splitlines()[command['line'] - 1]
                 self.assertEqual(shlex.split(line), command['argv'])
             for argument in command['argv']:
                 self.assertNotIn('$', argument)

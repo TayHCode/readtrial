@@ -6,7 +6,7 @@
   "quickstart": [
     {
       "file": "README.md",
-      "line": 104,
+      "line": 114,
       "argv": [
         "python",
         "-m",
@@ -20,7 +20,7 @@
     },
     {
       "file": "README.md",
-      "line": 38,
+      "line": 45,
       "argv": [
         "python3",
         "--version"
@@ -28,7 +28,7 @@
     },
     {
       "file": "README.md",
-      "line": 39,
+      "line": 46,
       "argv": [
         "python3",
         "-m",
@@ -38,7 +38,7 @@
     },
     {
       "file": "README.md",
-      "line": 105,
+      "line": 115,
       "argv": [
         "readtrial",
         "--help"
@@ -46,7 +46,7 @@
     },
     {
       "file": "README.md",
-      "line": 40,
+      "line": 47,
       "argv": [
         "python3",
         "-m",
@@ -80,11 +80,11 @@
         "--out",
         "trial-results/verify-demo"
       ],
-      "line": 817
+      "line": 826
     },
     {
       "file": "README.md",
-      "line": 889,
+      "line": 898,
       "argv": [
         "python3",
         "-m",
@@ -107,7 +107,7 @@
     },
     {
       "file": "README.md",
-      "line": 904,
+      "line": 913,
       "argv": [
         "python3",
         "-m",
@@ -139,7 +139,7 @@
         "--out",
         "trial-results/honest-proof"
       ],
-      "line": 924
+      "line": 933
     }
   ],
   "checks": [
@@ -155,7 +155,7 @@
         "-q"
       ],
       "file": "README.md",
-      "line": 41
+      "line": 48
     },
     {
       "role": "syntax",

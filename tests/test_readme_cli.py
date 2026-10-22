@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from readtrial.cli import parser
 from readtrial import setup
+from platforms import posix_only
 
 
 def documented_argv(text):
@@ -49,10 +50,11 @@ def validate(argv):
 
 
 class ReadmeCLITests(unittest.TestCase):
+    @posix_only
     def test_doctor_mac_setup_blocks_match_readme_and_request_public_key_input(self):
         from readtrial.account import provisioning_steps
         reference = provisioning_steps('trialuser')
-        readme = (Path(__file__).parents[1] / 'README.md').read_text()
+        readme = (Path(__file__).parents[1] / 'README.md').read_text(encoding='utf-8')
         section = readme.split('## Dedicated macOS test account\n', 1)[1]
         blocks = re.findall(r'```sh\n(.*?)```', reference, re.S)
         self.assertGreaterEqual(len(blocks), 5)
@@ -63,7 +65,7 @@ class ReadmeCLITests(unittest.TestCase):
 
     def test_every_fenced_readtrial_command_uses_real_subcommands_and_flags(self):
         readme = Path(__file__).parents[1] / 'README.md'
-        commands = list(documented_argv(readme.read_text()))
+        commands = list(documented_argv(readme.read_text(encoding='utf-8')))
         self.assertGreaterEqual(len(commands), 20)
         modes = set()
         for line, argv in commands:
