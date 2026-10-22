@@ -7,11 +7,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import resolved_tmp
 from readtrial import cli, setup
 from readtrial.process import Result
+from platforms import posix_only
 
 
 class SetupTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch('readtrial.setup.platform.system', return_value='Linux')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def result(self, value):
         return Result(0, json.dumps(value), 0)
 
@@ -68,6 +75,7 @@ class SetupTests(unittest.TestCase):
                 self.assertTrue(setup.doctor('Linux')['ready'])
             access.assert_not_called()
 
+    @posix_only
     def test_doctor_other_platforms_need_real_prerequisites(self):
         with patch('readtrial.setup.execute', return_value=Result(0, 'Disabled', 0)):
             self.assertFalse(setup.doctor('Windows')['ready'])
@@ -136,6 +144,7 @@ class SetupTests(unittest.TestCase):
             self.assertEqual(location.read_bytes(),b'existing file')
             self.assertFalse(any('create' in c.args[0] for c in run.call_args_list))
 
+    @posix_only
     def test_fresh_shell_readme_install_makes_uv_available_without_new_login(self):
         import os
         import subprocess
@@ -144,8 +153,8 @@ class SetupTests(unittest.TestCase):
             # Synthetic downloader emits a fixture installer; no network/install occurs.
             installer='test "$UV_NO_MODIFY_PATH" = 1; mkdir -p "$UV_INSTALL_DIR"; printf \'#!/bin/sh\\nexit 0\\n\' > "$UV_INSTALL_DIR/uv"; chmod +x "$UV_INSTALL_DIR/uv"'
             import shlex
-            curl=bin/'curl';curl.write_text('#!/bin/sh\n/bin/printf %s '+shlex.quote(installer)+'\n');curl.chmod(0o700)
-            readme=(Path(__file__).parents[1]/'README.md').read_text().split('## Isolated trials\n',1)[1].split('```sh\n',1)[1].split('```',1)[0]
+            curl=bin/'curl';curl.write_text('#!/bin/sh\nprintf %s '+shlex.quote(installer)+'\n');curl.chmod(0o700)
+            readme=(Path(__file__).parents[1]/'README.md').read_text(encoding='utf-8').split('## Isolated trials\n',1)[1].split('```sh\n',1)[1].split('```',1)[0]
             commands=readme.splitlines();last=commands.index('"$TOOLS/bin/uv" venv --python 3.12 .venv')
             result=subprocess.run(['sh','-e','-c','\n'.join(commands[:last+1])],cwd=root,env={**os.environ,'HOME':str(home),'PATH':str(bin)+':/usr/bin:/bin'},capture_output=True,text=True,timeout=5)
             self.assertEqual(result.returncode,0,result.stderr)

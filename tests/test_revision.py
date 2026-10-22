@@ -20,6 +20,7 @@ from readtrial.shell import posix_script, powershell_script, split, statuses
 from readtrial.targets import Limits, Target, TargetError
 from readtrial.trial import Agent, AgentError, run_target
 from readtrial.trusted import TrustedSSH, inspect
+from platforms import posix_only
 
 DIAGNOSTIC = 'Code Mode is unavailable because code-mode host is disabled'
 
@@ -137,6 +138,7 @@ class SegmentTests(unittest.TestCase):
             steps = statuses(stream.read().decode(), command)
         return result, steps
 
+    @posix_only
     def test_exact_failure_cannot_be_masked_by_echo(self):
         result, steps = self.measured('false && echo skipped; echo EXIT=$?')
         self.assertEqual(result.exit_code, 0)
@@ -144,10 +146,12 @@ class SegmentTests(unittest.TestCase):
         self.assertEqual(steps[0]['command'], 'false')
         self.assertIn('EXIT=1', result.output)
 
+    @posix_only
     def test_pipeline_and_or_failures_recorded(self):
         _, steps = self.measured('false | cat; false || echo recovered')
         self.assertEqual([s['exit_code'] for s in steps], [1, 0, 1, 0])
 
+    @posix_only
     def test_cd_state_preserved(self):
         result, steps = self.measured('cd . && printf ok; echo done')
         self.assertEqual(result.exit_code, 0)

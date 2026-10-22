@@ -9,9 +9,11 @@ from pathlib import Path
 from unittest.mock import patch
 from types import SimpleNamespace
 
+import resolved_tmp
 from readtrial.cli import parser
 from readtrial.targets import Limits, Target, TargetError
 from readtrial.process import Result
+from platforms import posix_only
 
 
 class DedicatedTests(unittest.TestCase):
@@ -27,12 +29,14 @@ class DedicatedTests(unittest.TestCase):
                                   '--agent-command', 'fake', '--out', 'unused'])
         self.assertTrue(args.dedicated_account)
 
+    @posix_only
     def test_standalone_sudo_audit_help_imports_no_controller(self):
         script=Path(__file__).parents[1]/'readtrial/account.py'
         result=subprocess.run([sys.executable,'-B',str(script),'--help'],capture_output=True,text=True,timeout=10)
         self.assertEqual(result.returncode,0,result.stderr)
         self.assertIn('--test-user',result.stdout)
 
+    @posix_only
     def test_reject_unsafe_accounts_and_ambiguous_sudo(self):
         from readtrial.account import validate_account
         validate_account(self.account(), 'trialuser')
@@ -45,6 +49,7 @@ class DedicatedTests(unittest.TestCase):
             with self.subTest(key=key, value=value), self.assertRaises(ValueError):
                 validate_account(account, 'trialuser')
 
+    @posix_only
     def test_preflight_failure_prevents_bundle_upload_and_creation(self):
         target = Target('ssh:trialuser' + '@' + 'example.invalid', Limits(), lambda *a: None,
                         trusted_target=True, dedicated_account=True)
@@ -62,6 +67,7 @@ class DedicatedTests(unittest.TestCase):
             with self.assertRaisesRegex(TargetError, 'macOS'):
                 target.prepare(Path('unused'))
 
+    @posix_only
     def test_cleanup_requires_journal_and_exact_owned_path(self):
         from readtrial.account import AccountSSH
         target = Target('ssh:trialuser' + '@' + 'example.invalid', Limits(), lambda *a: None,
@@ -72,6 +78,7 @@ class DedicatedTests(unittest.TestCase):
         with self.assertRaisesRegex(TargetError, 'journal'):
             account.authorize_cleanup()
 
+    @posix_only
     def test_pid_reuse_never_killed(self):
         from readtrial.account import verified_process
         saved = {'pid': 123, 'uid': 502, 'pgid': 123, 'start': 'Mon Oct 12 01:02:03 2026'}
@@ -80,6 +87,7 @@ class DedicatedTests(unittest.TestCase):
             current = dict(saved); current[key] = value
             self.assertFalse(verified_process(saved, current, 502))
 
+    @posix_only
     def test_doctor_prints_exact_provisioning_steps_even_when_ready(self):
         from readtrial import setup
         with patch('readtrial.account.local_probe', return_value=self.account()):
@@ -89,6 +97,7 @@ class DedicatedTests(unittest.TestCase):
         for word in ['sysadminctl', 'dscl', 'dseditgroup', 'authorized_keys', 'attest-sudo', 'ssh']:
             self.assertIn(word, instructions)
 
+    @posix_only
     def test_ambiguous_sudo_fails_doctor(self):
         from readtrial import setup
         account = self.account(); account['sudo'] = 'password-required'
@@ -99,6 +108,7 @@ class DedicatedTests(unittest.TestCase):
         self.assertEqual(missing, ['Sudo policy denies this account'])
         self.assertTrue(next(row['ready'] for row in report['checks'] if row['check'] == 'SSH session connected'))
 
+    @posix_only
     def test_home_manifest_detects_native_home_writes_without_removing_them(self):
         from readtrial.account import home_manifest
         with tempfile.TemporaryDirectory() as folder:
@@ -108,6 +118,7 @@ class DedicatedTests(unittest.TestCase):
             self.assertNotEqual(before, home_manifest(str(root)))
             self.assertEqual(fixture.read_text(), 'after')
 
+    @posix_only
     def test_manifest_never_follows_links_into_owner_home(self):
         from readtrial.account import home_manifest
         with tempfile.TemporaryDirectory() as folder:
@@ -123,6 +134,7 @@ class DedicatedTests(unittest.TestCase):
         return root, dict(base=str(root), id=root.name,
                           root_identity=dict(device=info.st_dev, inode=info.st_ino), processes=[])
 
+    @posix_only
     def test_cleanup_refuses_replaced_root_and_preserves_unfamiliar_file(self):
         from readtrial.account import remote_action
         with tempfile.TemporaryDirectory() as folder:
@@ -134,6 +146,7 @@ class DedicatedTests(unittest.TestCase):
                     remote_action('cleanup', data)
             self.assertEqual(fixture.read_text(), 'preserve')
 
+    @posix_only
     def test_cleanup_never_signals_unjournaled_process_record(self):
         from readtrial.account import remote_action
         with tempfile.TemporaryDirectory() as folder:
@@ -145,6 +158,7 @@ class DedicatedTests(unittest.TestCase):
                     remote_action('cleanup', data)
             kill.assert_not_called(); self.assertTrue(root.exists())
 
+    @posix_only
     def test_cleanup_handles_more_than_nine_journaled_commands(self):
         from readtrial.account import remote_action
         with tempfile.TemporaryDirectory() as folder:
@@ -167,6 +181,7 @@ class DedicatedTests(unittest.TestCase):
             os.setxattr(fixture,'user.readtrial_test',b'synthetic')
             self.assertNotEqual(before,home_manifest(str(root)))
 
+    @posix_only
     def test_reused_pid_refuses_signal(self):
         from readtrial.account import kill_verified
         saved = dict(pid=123, pgid=123, uid=os.getuid(), start='before')
@@ -176,6 +191,7 @@ class DedicatedTests(unittest.TestCase):
                 kill_verified(saved)
         kill.assert_not_called()
 
+    @posix_only
     def test_transport_journals_identity_before_releasing_command(self):
         from readtrial.account import AccountSSH
         with tempfile.TemporaryDirectory() as folder:
@@ -194,6 +210,7 @@ class DedicatedTests(unittest.TestCase):
             with patch.object(account,'request',side_effect=request):
                 account.transport('echo ok', 1, guard=False)
 
+    @posix_only
     def test_attestation_refuses_allowed_policy_without_writing(self):
         from readtrial.account import attest_sudo
         with patch('readtrial.account.os.getuid',return_value=0), \
@@ -204,6 +221,7 @@ class DedicatedTests(unittest.TestCase):
                 attest_sudo('trialuser',yes=True)
         write.assert_not_called()
 
+    @posix_only
     def test_macos_administrator_list_denial_can_exit_zero(self):
         from readtrial.account import attest_sudo
         account=SimpleNamespace(pw_uid=502,pw_gid=510,pw_dir='/Users/' + 'trialuser')

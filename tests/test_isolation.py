@@ -12,6 +12,7 @@ from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
 
+import resolved_tmp
 from readtrial import isolation
 from readtrial.installers import environment
 from readtrial.process import Result
@@ -19,6 +20,7 @@ from readtrial.targets import Limits, Target, TargetError
 from readtrial.worker import initialise_workspace, policy, sandbox
 from readtrial.trial import run_target
 from test_trial import FakeAgent, FakeTarget
+from platforms import needs_xattr, posix_only
 
 
 class IsolationTests(unittest.TestCase):
@@ -29,6 +31,7 @@ class IsolationTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    @posix_only
     def test_complete_owned_environment_and_second_trial_empty(self):
         for number in range(2):
             root = self.root / str(number)
@@ -62,6 +65,7 @@ class IsolationTests(unittest.TestCase):
             self.assertEqual(argv[index - 1], '--setenv')
             self.assertEqual(argv[index + 1], value)
 
+    @posix_only
     def test_uploaded_worker_import_and_environment_initialization(self):
         control = self.root / 'control'
         control.mkdir()
@@ -77,6 +81,7 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(result.stdout.strip(), str(workspace / 'home/state'))
         self.assertEqual(list((workspace / 'home/state').iterdir()), [])
 
+    @needs_xattr
     def test_manifest_exact_content_mode_absence_and_symlinks(self):
         protected = self.root / 'protected'
         protected.mkdir()
@@ -97,6 +102,7 @@ class IsolationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'symlink'):
             isolation.manifest([protected])
 
+    @posix_only
     def test_manifest_rejects_special_unreadable_and_parent_link(self):
         pipe = self.root / 'pipe'
         os.mkfifo(pipe)
@@ -111,6 +117,7 @@ class IsolationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             isolation.manifest([self.root / 'alias' / 'sentinel'])
 
+    @needs_xattr
     def test_manifest_bound_and_internal_link_identity(self):
         root = self.root / 'protected'
         root.mkdir()
@@ -123,6 +130,7 @@ class IsolationTests(unittest.TestCase):
         with patch('readtrial.isolation.MAX_BYTES', 0), self.assertRaises(ValueError):
             isolation.manifest([root])
 
+    @needs_xattr
     def test_protected_extended_metadata_changes_are_detected(self):
         sentinel = self.root / 'sentinel'
         sentinel.write_text('same content')
@@ -133,6 +141,7 @@ class IsolationTests(unittest.TestCase):
         self.assertNotEqual(before['0:.']['xattrs'], after['0:.']['xattrs'])
 
 
+    @posix_only
     def test_journal_durable_write_ahead_and_readonly_exact_discovery(self):
         directory = self.root / 'journals'
         resource = self.root / ('readtrial-' + 'a' * 32)
@@ -153,6 +162,7 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(directory.stat().st_mode), 0o700)
         self.assertEqual(stat.S_IMODE(journal.path.stat().st_mode), 0o600)
 
+    @posix_only
     def test_malformed_journal_and_links_rejected(self):
         directory = self.root / 'journals'
         journal = isolation.Journal(directory, 'readtrial-' + 'c' * 32, 'lxc')
@@ -167,6 +177,7 @@ class IsolationTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             isolation.leftovers(directory)
 
+    @posix_only
     def test_lxc_discovery_uses_exact_name_and_checks_tag(self):
         directory = self.root / 'journals'
         journal = isolation.Journal(directory, 'readtrial-' + 'd' * 32, 'lxc')
@@ -187,6 +198,7 @@ class IsolationTests(unittest.TestCase):
         target.configure_isolation(self.root / 'evidence', {}, bundle)
         return target, bundle
 
+    @needs_xattr
     def test_quota_unenforced_fails_before_creation(self):
         target, bundle = self.target()
         outputs = [Result(0, json.dumps({'driver': 'dir', 'config': {'source': str(self.root)}}), 0),
@@ -198,6 +210,7 @@ class IsolationTests(unittest.TestCase):
         self.assertFalse(any('init' in call.args[0] for call in command.call_args_list))
         self.assertEqual(target.capabilities['effective']['root_disk']['status'], 'unsupported')
 
+    @needs_xattr
     def test_unknown_or_unreadable_quota_rejects_without_mutation(self):
         for result in (Result(0, '{}', 0), Result(0, '{"driver":"unknown"}', 0),
                        Result(0, '{"driver":"zfs"}', 0, truncated=True)):
@@ -209,6 +222,7 @@ class IsolationTests(unittest.TestCase):
             target.close()
             self.root.joinpath('evidence').rename(self.root / target.id)
 
+    @needs_xattr
     def test_tag_mismatch_preserves_instance_and_still_checks_host(self):
         target, bundle = self.target()
         target.guard_before()
@@ -222,6 +236,7 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(target.capabilities['guards']['status'], 'unchanged')
         self.assertEqual(json.loads(target.journal.path.read_text())['phase'], 'incomplete')
 
+    @posix_only
     def test_absence_proves_guest_paths_absent_without_prefix_deletion(self):
         journal = isolation.Journal(self.root / 'journals', 'readtrial-' + 'e' * 32, 'lxc')
         journal.intent('lxc', journal.id)
@@ -247,6 +262,7 @@ class IsolationTests(unittest.TestCase):
         self.assertEqual(result['error'], 'interrupted')
         self.assertEqual(Interrupted.closed, before + 1)
 
+    @needs_xattr
     def test_failed_setup_journal_precedes_creation(self):
         target, bundle = self.target()
         def manage(argv, **kwargs):
@@ -260,6 +276,7 @@ class IsolationTests(unittest.TestCase):
             with self.assertRaisesRegex(TargetError, 'init failure'):
                 target.prepare(bundle)
 
+    @needs_xattr
     def test_guard_mismatch_and_unreadable_postcheck_fail_without_restore(self):
         for failure in ('mismatch', 'unreadable'):
             with self.subTest(failure=failure):
@@ -281,6 +298,7 @@ class IsolationTests(unittest.TestCase):
                             target.close()
                 self.assertEqual(target.capabilities['guards']['status'], 'failed')
 
+    @needs_xattr
     def test_cleanup_truncation_cannot_certify_absence(self):
         target, bundle = self.target()
         target.guard_before()

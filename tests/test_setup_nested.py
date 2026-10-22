@@ -14,6 +14,11 @@ def result(value):
 
 
 class NestedSetupTests(unittest.TestCase):
+    def setUp(self):
+        patcher = patch('readtrial.setup.platform.system', return_value='Linux')
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_missing_loop_in_container_explains_doctor_dead_end(self):
         with patch('readtrial.setup.nested_loop_unavailable', return_value=True), patch('readtrial.setup.shutil.which', return_value='/snap/bin/lxc'), patch('readtrial.setup.in_lxd_group', return_value=True), patch('readtrial.setup.query', side_effect=[{'api_version': '1.0'}, [{'driver': 'dir', 'status': 'Created'}]]):
             report = setup.doctor('Linux')

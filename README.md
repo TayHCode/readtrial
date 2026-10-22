@@ -20,9 +20,16 @@ controller. Start from a checkout of
 | Windows | Disposable Linux VM controller → LXC trial guest | Follow the Linux setup inside the VM; the VM is the controller, and LXC is the separate trial target. Native Windows SSH is **trusted mode only**, without quotas or Job Object isolation. |
 
 **Windows Sandbox is not supported:** readtrial has no backend to create,
-control, attest or recover Sandbox targets. Enabling the Windows feature does
-not provide a readtrial target. Create the Linux VM yourself; readtrial does not
-orchestrate VMs. Native macOS and Windows controller trials remain unverified.
+control, attest or recover Sandbox targets. Create the Linux VM yourself;
+readtrial does not orchestrate VMs.
+
+## What runs on each OS
+
+| Feature | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| `--help`, offline `demo` | Yes | Yes | Yes |
+| Unit suite | All tests | Skips `os.listxattr` tests and one `verify` test | Skips tests that need POSIX |
+| `verify`, `run`, `doctor`, isolated trials | Yes | Unverified | No: POSIX only |
 
 ## Five-minute CLI quickstart
 
@@ -53,6 +60,8 @@ Stock macOS Python may be too old. If `python3 --version` is 3.11 or newer:
 
 ```sh
 python3 -m readtrial --help
+python3 -m readtrial demo --out trial-results/demo
+python3 -m unittest discover -s tests -q
 ```
 
 Otherwise, use uv to obtain an isolated interpreter:
@@ -73,6 +82,8 @@ With Python 3.11+ installed and the Python launcher available:
 
 ```powershell
 py -3 -m readtrial --help
+py -3 -m readtrial demo --out trial-results\demo
+py -3 -m unittest discover -s tests -q
 ```
 
 With uv installed instead:
@@ -82,11 +93,10 @@ uv run --no-project --python 3.12 python -m readtrial --help
 ```
 
 For isolated trials on Windows, create a disposable Linux VM and follow
-[Isolated trials](#isolated-trials) inside it. Windows Sandbox is not supported.
-Run native Windows SSH trials from a Linux controller with `--trusted-target`.
+[Isolated trials](#isolated-trials) inside it. Run native Windows SSH trials from a Linux controller with `--trusted-target`.
 The SSH login shell may be cmd; trial commands use PowerShell with profiles off.
-The unit suite's controller process tests require POSIX. Windows-controller
-trial execution remains unverified.
+The unit suite skips the POSIX-only controller tests. Windows-controller trials
+are not supported.
 
 ### Optional installed command
 
@@ -757,8 +767,7 @@ See [DEMO.md](DEMO.md) for outcomes and limits.
 | OCI target | Docker and Podman unavailable in the verification environment | Unsupported |
 | Python 3.11 and 3.14 | Managed interpreters; clean-clone unit suite and installed CLI quickstart | Verified locally |
 
-The round-four stranger controller had only system Python 3.14, so that tester
-did not run Python 3.11. Reproduce the release check using a uv-managed interpreter:
+Reproduce the release check with uv-managed interpreters:
 
 ```sh
 uv run --no-project --python 3.11 python -m unittest discover -s tests -q
@@ -1008,11 +1017,9 @@ Optional checks: `uvx ruff check --no-cache readtrial tests` and
 ## Limitations
 
 Linux controllers support confined LXC targets and explicitly acknowledged Linux/macOS/Windows
-SSH targets. Native macOS/Windows controller trials remain unverified. Windows Sandbox has no
-readtrial backend; use a disposable Linux VM with LXC instead. Nested controllers
+SSH targets. Nested controllers
 without loop devices require an existing quota-capable pool; never expose host
-devices or sockets to bypass preflight. OCI execution is unsupported
-in this release-preparation environment and has no advertised quickstart.
+devices or sockets to bypass preflight.
 README trials requiring repository authentication, browser/UI testing, deployment, and VM orchestration are
 unsupported. Verify mode supports trusted local POSIX CLI and command-driven API journeys;
 it has no native browser, desktop UI or TUI driver, and no interactive stdin runner.

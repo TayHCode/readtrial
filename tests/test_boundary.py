@@ -5,9 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import resolved_tmp
 from readtrial import isolation
 from readtrial.process import Result
 from readtrial.targets import Target, TargetError, Limits
+from platforms import posix_only
 
 class BoundaryTests(unittest.TestCase):
     def setUp(self):
@@ -39,6 +41,7 @@ class BoundaryTests(unittest.TestCase):
             d={**good,key:value}
             with self.subTest(key=key),patch.object(self.target,'management',return_value=Result(0,json.dumps(d),0)):
                 with self.assertRaises(TargetError):self.target.attest_lxc_kernel()
+    @posix_only
     def test_recovery_exact_tag_required_and_idempotent(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp)/'journals'; j=isolation.Journal(directory,'readtrial-'+'a'*32,'lxc');j.intent('lxc',j.id);j.intent('target-path','/tmp/'+j.id+'/home')
@@ -55,6 +58,7 @@ class BoundaryTests(unittest.TestCase):
             with patch('readtrial.isolation.execute',return_value=Result(0,json.dumps([{'name':j.id,'config':{}}]),0)) as run:
                 with self.assertRaises(ValueError):isolation.recover(directory,yes=True)
             self.assertFalse(any('delete' in c.args[0] for c in run.call_args_list))
+    @posix_only
     def test_recovery_no_yes_and_unknown_resources_never_delete(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp)/'journals';j=isolation.Journal(directory,'readtrial-'+'b'*32,'ssh');j.intent('target-path','/tmp/'+j.id)
@@ -75,6 +79,7 @@ class BoundaryTests(unittest.TestCase):
             with self.subTest(key=key),patch.object(self.target,'management',return_value=Result(0,json.dumps({**good,key:value}),0)):
                 with self.assertRaises(TargetError):self.target.attest_namespace(['bootstrap'],'bootstrap')
 
+    @posix_only
     def test_recovery_rechecks_tag_after_discovery_before_delete(self):
         with tempfile.TemporaryDirectory() as temp:
             directory=Path(temp)/'journals';j=isolation.Journal(directory,'readtrial-'+'c'*32,'lxc');j.intent('lxc',j.id)
@@ -84,6 +89,7 @@ class BoundaryTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError,'changed'):isolation.recover(directory,yes=True)
             self.assertFalse(any('delete' in c.args[0] for c in run.call_args_list))
 
+    @posix_only
     def test_recovery_covers_each_partial_creation_phase(self):
         for phase in ('creating','running','closing','incomplete'):
             with self.subTest(phase=phase),tempfile.TemporaryDirectory() as temp:
@@ -92,6 +98,7 @@ class BoundaryTests(unittest.TestCase):
                     self.assertEqual(isolation.recover(directory,yes=True)[0]['status'],'absent')
                 self.assertFalse(any('delete' in c.args[0] for c in run.call_args_list))
 
+    @posix_only
     def test_root_quota_requires_bounded_independent_exercise(self):
         with tempfile.TemporaryDirectory() as temp:
             root=Path(temp);self.target.configure_isolation(root/'out',{},root/'bundle')

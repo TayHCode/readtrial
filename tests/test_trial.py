@@ -23,6 +23,7 @@ from readtrial.trial import (
     run_target,
     verdict,
 )
+from platforms import posix_only
 
 
 # Runtime-only fake data, never a real key or credential.
@@ -103,10 +104,12 @@ class TrialTests(unittest.TestCase):
         return run_target(self.config, "ssh:example", self.root / "result", self.root / "source.bundle",
                           "abc123", target_factory=FakeTarget, agent_factory=FakeAgent, **kwargs)
 
+    @posix_only
     def test_pass_from_checks(self):
         self.assertEqual(self.trial()["verdict"], "PASS (partial)")
         self.assertEqual(FakeTarget.closed, 1)
 
+    @posix_only
     def test_blocker_opinion_cannot_fail(self):
         FakeAgent.actions = [{"done": True, "findings": [finding()]}]
         self.assertEqual(self.trial()["verdict"], "PASS (partial)")
@@ -115,6 +118,7 @@ class TrialTests(unittest.TestCase):
         FakeTarget.commands["verify"] = Result(1, "bad", 0)
         self.assertEqual(self.trial()["verdict"], "FAIL")
 
+    @posix_only
     def test_regex_mismatch(self):
         FakeTarget.commands["verify"] = Result(0, "different", 0)
         self.assertEqual(self.trial()["verdict"], "FAIL")
@@ -123,11 +127,13 @@ class TrialTests(unittest.TestCase):
         self.config["checks"] = []
         self.assertEqual(self.trial()["verdict"], "INCOMPLETE")
 
+    @posix_only
     def test_repo_declarations(self):
         self.config["checks"] = []
         FakeTarget.metadata = '{"checks":[{"command":"verify","match":"OK"}]}'
         self.assertEqual(self.trial()["verdict"], "PASS (partial)")
 
+    @posix_only
     def test_cli_overrides_repo_declarations(self):
         FakeTarget.metadata = 'not json'
         self.assertEqual(self.trial()["verdict"], "PASS (partial)")
@@ -138,10 +144,12 @@ class TrialTests(unittest.TestCase):
         FakeTarget.metadata = '{"checks":"echo OK"}'
         self.assertEqual(self.trial()["verdict"], "INCOMPLETE")
 
+    @posix_only
     def test_hidden_checks(self):
         self.trial()
         self.assertNotIn("verify", json.dumps(FakeAgent.calls))
 
+    @posix_only
     def test_trial_failure_cannot_be_overruled(self):
         FakeAgent.actions = [{"command": "attempt"}, {"done": True, "findings": []}]
         FakeTarget.commands["attempt"] = Result(1, "bad", 0)
@@ -152,6 +160,7 @@ class TrialTests(unittest.TestCase):
         FakeTarget.commands["attempt"] = Result(126, "", 0, denied="unsafe")
         self.assertEqual(self.trial()["verdict"], "INCOMPLETE")
 
+    @posix_only
     def test_trial_output_cap(self):
         FakeAgent.actions = [{"command": "attempt"}, {"done": True, "findings": []}]
         FakeTarget.commands["attempt"] = Result(0, "OK", 0, truncated=True)
@@ -176,6 +185,7 @@ class TrialTests(unittest.TestCase):
         self.assertEqual(self.trial()["verdict"], "INCOMPLETE")
         self.assertEqual(FakeTarget.closed, 1)
 
+    @posix_only
     def test_cleanup_failure_blocks_pass(self):
         FakeTarget.close_error = "cleanup failure"
         self.assertEqual(self.trial()["verdict"], "INCOMPLETE")
@@ -193,6 +203,7 @@ class TrialTests(unittest.TestCase):
         self.assertTrue(changes["unassessed"][0]["id"].startswith("advisory-"))
         self.assertEqual(changes["unassessed"][0]["command"], finding()["command"])
 
+    @posix_only
     def test_reports_and_command_evidence(self):
         self.trial()
         report = self.root / "result"
@@ -278,6 +289,7 @@ class PureTests(unittest.TestCase):
         self.assertIn("ForwardAgent=no", value)
         self.assertIn("StrictHostKeyChecking=yes", value)
 
+    @posix_only
     def test_regex(self):
         self.assertTrue(regex_match("O+K", "OOK", 1))
         self.assertFalse(regex_match("missing", "OOK", 1))
@@ -296,16 +308,19 @@ class PureTests(unittest.TestCase):
 
 
 class ProcessTests(unittest.TestCase):
+    @posix_only
     def test_output_cap(self):
         result = execute([sys.executable, "-c", "print('x'*100000)"], cap=100)
         self.assertTrue(result.truncated)
         self.assertEqual(len(result.output), 100)
 
+    @posix_only
     def test_timeout(self):
         result = execute([sys.executable, "-c", "import time;time.sleep(10)"], timeout=0.15)
         self.assertTrue(result.timed_out)
         self.assertLess(result.seconds, 2)
 
+    @posix_only
     def test_exit_and_stdin(self):
         result = execute([sys.executable, "-c", "import sys;print(sys.stdin.read());sys.exit(3)"], data=b"fake input")
         self.assertEqual(result.exit_code, 3)
@@ -314,6 +329,7 @@ class ProcessTests(unittest.TestCase):
     def test_missing_command(self):
         self.assertEqual(execute(["/nonexistent/readtrial-test"]).exit_code, 127)
 
+    @posix_only
     def test_orphan_holding_pipe_killed(self):
         script = "import subprocess,sys;subprocess.Popen([sys.executable,'-c','import time;time.sleep(10)'])"
         result = execute([sys.executable, "-c", script], timeout=0.2)
@@ -452,6 +468,7 @@ class AdditionalFailureTests(unittest.TestCase):
             PolicyTests.worker.protect_control()
             library.return_value.prctl.assert_called_once_with(4, 0, 0, 0, 0)
 
+    @posix_only
     def test_stdout_close_does_not_kill_successful_child(self):
         script = "import os,time;os.close(1);os.close(2);time.sleep(.05)"
         result = execute([sys.executable, "-c", script], timeout=1)

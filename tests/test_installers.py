@@ -8,6 +8,7 @@ from readtrial.installers import UV_PS, UV_SH, environment, prepare
 from readtrial.process import Result
 from readtrial.targets import Limits, Target
 from readtrial.trusted import TrustedSSH, inspect
+from platforms import posix_only
 
 
 class InstallerTests(unittest.TestCase):
@@ -225,6 +226,7 @@ class InstallerTests(unittest.TestCase):
         self.assertIn(self.winfolder + '\\bin', records[0][1])
         self.assertEqual(records[-1][1], command)
 
+    @posix_only
     def test_linux_worker_uses_installer_rewrite_with_fake_execution(self):
         import io
 

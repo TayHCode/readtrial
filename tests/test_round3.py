@@ -16,6 +16,7 @@ from readtrial.process import Result
 from readtrial.targets import Limits, Target
 from readtrial.trial import Agent, AgentError, run, run_target
 from readtrial.trusted import TrustedSSH
+from platforms import posix_only
 
 COMMAND = 'py -3 hello.py --version'
 
@@ -139,6 +140,7 @@ class RoundThreeTests(unittest.TestCase):
                 self.assertEqual(changes['status'], 'incomplete')
                 self.assertEqual(len(changes['unassessed']), 1)
 
+    @posix_only
     def test_fail_stdout_names_readme_step_command_and_exit(self):
         result = self.trial('first')
         with patch('readtrial.trial.snapshot', return_value=(Path('unused'), 'fake')), \

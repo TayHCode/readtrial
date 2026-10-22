@@ -16,6 +16,7 @@ from readtrial.targets import Limits, Target
 from readtrial.trial import Agent, diff, run, run_target
 from readtrial.trusted import TrustedSSH, inspect
 from readtrial.worker import policy
+from platforms import posix_only
 
 README = '# Example\n\n## Quickstart\n```sh\npython3 hello.py --help\npython3 hello.py --name Ada\n```\n'
 
@@ -48,6 +49,7 @@ class RoundTwoTests(unittest.TestCase):
         return run_target(self.config, 'fake', self.root / 'result', Path('unused'), 'fake',
                           target_factory=ReadmeTarget, agent_factory=FakeAgent)
 
+    @posix_only
     def test_help_only_has_partial_verdict_and_stdout_coverage(self):
         result = self.trial([{'command': 'python3 hello.py --help'}])
         self.assertEqual(result['verdict'], 'PASS (partial)')
@@ -83,6 +85,7 @@ class RoundTwoTests(unittest.TestCase):
         self.assertTrue(all(item['type'] == 'TOOL' for item in items))
         self.assertIn('trial ended after denial', (self.root / 'result/report.md').read_text().lower())
 
+    @posix_only
     def test_posix_parent_path_inside_clone_and_symlink_escape(self):
         repo = self.root / 'repo'
         (repo / 'examples').mkdir(parents=True)
@@ -171,6 +174,7 @@ class RoundTwoTests(unittest.TestCase):
         self.assertEqual([s['command'] for s in declared_steps(doc, 'Linux')], ['python3 hello.py  --help'])
         self.assertEqual([s['command'] for s in declared_steps(doc, 'Windows')], ['py -3 hello.py --help'])
 
+    @posix_only
     def test_path_guard_executes_in_clone_and_refuses_physical_escape(self):
         repo = self.root / 'repo'
         (repo / 'examples').mkdir(parents=True)
